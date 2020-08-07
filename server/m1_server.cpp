@@ -145,6 +145,74 @@ void rmvEl(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& 
 	}
 }
 
+void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& input_request_stream)
+{
+	// Inizializzazione variabili
+	boost::array<char, 1024> buf;
+	std::string file_path;
+	std::string file_name;
+	size_t file_size = -1;
+	time_t last_edit; // TODO: AGGIORNARE ROOT CON NUOVO FILE
+	boost::system::error_code error;
+
+	// ricezione path file e dimensione
+	input_request_stream >> file_path;
+	input_request_stream >> file_size;
+	input_request_stream >> last_edit;
+	input_request_stream.read(buf.c_array(), 2); // eat the "\n\n"
+
+
+	std::cout << file_path << " size is " << file_size << std::endl;
+	size_t pos = file_path.find_last_of("/");
+	if (pos != std::string::npos)
+		file_name = file_path.substr(pos + 1); // file name in file path
+
+	std::ofstream output_file(file_path.c_str(), std::ios_base::binary);
+	if (!output_file) {
+		std::cout << "ECCEZIONE: failed to open " << file_path << std::endl;
+	}
+
+	while (true) {
+		// Inizializzazione dei buffer necessari per ricevere il messaggio di trasmissione file intermedio
+		// (SENDING_FILE o END_SEND_FILE)
+		boost::asio::streambuf request_buf;
+		boost::asio::read_until(socket, request_buf, "\n\n");
+		std::cout << "request size:" << request_buf.size() << "\n";
+		std::istream input_request_stream(&request_buf);
+		int com_code;
+		input_request_stream >> com_code;
+
+		if (com_code == SENDING_FILE) {
+			// Legge bytes trasmessi e li scrive su file
+			size_t len = socket.read_some(boost::asio::buffer(buf), error);
+
+			if (len > 0) {
+				output_file.write(buf.c_array(), (std::streamsize) len);
+			}
+			if (error) {
+				std::cout << "error: " << error << std::endl;
+				break;
+			}
+		}
+		else if (com_code == END_SEND_FILE) {
+			// A fine trasmissione, controlla la dimensione file per capire se qualcosa è cambiato durante la trasmissione
+			// in fine chiude il file
+			if (output_file.tellp() == (std::fstream::pos_type)(std::streamsize) file_size) {
+				out("file ricevuto senza problemi");
+			}
+			else {
+				out("dimensione file è cambiata durante la trasmissione, o errore trasmissione file_size");
+			}
+			
+			std::cout << "received " << output_file.tellp() << " bytes.\n";
+			output_file.close();
+			break;
+		}
+	}
+
+	std::cout << "received " << output_file.tellp() << " bytes.\n";
+}
+
 void clientHandler(tcp::socket& socket)
 {
 	bool quit = false;
@@ -180,6 +248,12 @@ void clientHandler(tcp::socket& socket)
 
 			case RMV_ELEMENT:
 				rmvEl(socket, root, request_stream);
+				break;
+
+			case RNM_ELEMENT:
+				break;
+
+			case START_SEND_FILE:
 				break;
 
 			case END_COMMUNICATION:
