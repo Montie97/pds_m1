@@ -122,7 +122,7 @@ void mkDir(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& 
 
 	std::shared_ptr<Directory> ptr = root->addDirectory(path_name);
 	if (!ptr) {
-		out("ECCEZZIONAZZA: per quale motivo la dir non è stata creata?");
+		out("ECCEZIONAZZA: per quale motivo la dir non è stata creata?");
 	}
 }
 
@@ -137,7 +137,28 @@ void rmvEl(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& 
 		boost::filesystem::remove(p);
 
 		if (!root->remove(path_name)) {
-			out("ECCEZZIONE: percorso sbagliato o file inesistente");
+			out("ECCEZIONE: percorso sbagliato o file inesistente");
+		}
+	}
+	else {
+		out("File inesistente");
+	}
+}
+
+void rnmEl(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& input_request_stream)
+{
+	std::string path_old_name;
+	std::string path_new_name;
+	input_request_stream >> path_old_name;
+	input_request_stream >> path_new_name;
+
+	boost::filesystem::path p(path_old_name);
+
+	if (boost::filesystem::exists(p)) {
+		boost::filesystem::rename(path_old_name, path_new_name);
+
+		if (!root->rename(path_old_name, path_new_name)) {
+			out("ECCEZIONE: percorso sbagliato o file inesistente");
 		}
 	}
 	else {
@@ -150,7 +171,6 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, std
 	// Inizializzazione variabili
 	boost::array<char, 1024> buf;
 	std::string file_path;
-	std::string file_name;
 	size_t file_size = -1;
 	time_t last_edit; // TODO: AGGIORNARE ROOT CON NUOVO FILE
 	boost::system::error_code error;
@@ -163,9 +183,6 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, std
 
 
 	std::cout << file_path << " size is " << file_size << std::endl;
-	size_t pos = file_path.find_last_of("/");
-	if (pos != std::string::npos)
-		file_name = file_path.substr(pos + 1); // file name in file path
 
 	std::ofstream output_file(file_path.c_str(), std::ios_base::binary);
 	if (!output_file) {
@@ -204,13 +221,18 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, std
 				out("dimensione file è cambiata durante la trasmissione, o errore trasmissione file_size");
 			}
 			
+			//se il file è arrivato si aggiorna il filesystem
+			std::shared_ptr<File> ptr = root->addFile(file_path, file_size, last_edit);
+			if (!ptr) {
+				out("ECCEZZIONAZZA: per quale motivo il file non è stato creato?");
+			}
+
+			//chiusura file
 			std::cout << "received " << output_file.tellp() << " bytes.\n";
 			output_file.close();
 			break;
 		}
 	}
-
-	std::cout << "received " << output_file.tellp() << " bytes.\n";
 }
 
 void clientHandler(tcp::socket& socket)
@@ -251,9 +273,11 @@ void clientHandler(tcp::socket& socket)
 				break;
 
 			case RNM_ELEMENT:
+				// TO DO: rinomina file o path
 				break;
 
 			case START_SEND_FILE:
+				startSendingFile(socket, root, request_stream);
 				break;
 
 			case END_COMMUNICATION:
