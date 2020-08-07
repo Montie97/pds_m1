@@ -14,7 +14,8 @@ public:
     Directory() = default;
     ~Directory() = default;
     void ls(int indent) const;
-    bool remove(std::string names);
+    bool remove(std::string name);
+	bool rename(std::string old_name, std::string new_name);
     static std::shared_ptr<Directory> getRoot();
     std::shared_ptr<File> getFile(const std::string& name);
     std::shared_ptr<Directory> getDir(const std::string& name);
@@ -23,6 +24,7 @@ public:
     std::shared_ptr<Directory> addDirectory(std::string name);
     std::shared_ptr<File> addFile(std::string name, uintmax_t size, time_t last_edit);
     static std::shared_ptr<Directory> makeDirectory(std::string name, std::weak_ptr<Directory> parent);
+	void setName(const std::string& new_name);
 	std::string getChecksum();
 	void calculateChecksum();
 };

@@ -12,6 +12,7 @@ public:
     void ls(int indent) const;
     uintmax_t getSize() const;
 	static std::shared_ptr<File> makeFile(const std::string& name, uintmax_t size, time_t last_edit);
+	void setName(const std::string& new_name);
 	std::string getChecksum();
 	void calculateChecksum();
 };

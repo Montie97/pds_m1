@@ -166,6 +166,31 @@ bool Directory::remove(std::string name)
     return false;
 }
 
+bool Directory::rename(std::string old_name, std::string new_name)
+{
+	std::shared_ptr<Directory> dir = shared_from_this();
+
+	if (old_name.find("/") != std::string::npos) {
+		std::string path = old_name.substr(0, old_name.rfind("/"));
+		old_name = old_name.substr(old_name.rfind("/") + 1, old_name.length());
+		new_name = new_name.substr(new_name.rfind("/") + 1, new_name.length());
+		dir = std::dynamic_pointer_cast<Directory>(searchDirEl(path));
+		if (dir == nullptr)
+			return false;
+	}
+
+	if (new_name == ".." || new_name == ".")
+		return false;
+	
+	dir->children[old_name]->setName(new_name);
+	return true;
+}
+
+void Directory::setName(const std::string& new_name)
+{
+	this->name = new_name;
+}
+
 std::string Directory::getChecksum()
 {
 	return this->checksum;

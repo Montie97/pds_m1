@@ -28,6 +28,11 @@ int File::type() const
     return 1;
 }
 
+void File::setName(const std::string& new_name)
+{
+	this->name = new_name;
+}
+
 std::string File::getChecksum()
 {
 	return this->checksum;

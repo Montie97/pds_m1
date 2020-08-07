@@ -238,12 +238,7 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, std
 void clientHandler(tcp::socket& socket)
 {
 	bool quit = false;
-
-	//std::string folder_path = "../_test_folder";
-	//boost::filesystem::path p(folder_path);
-	std::shared_ptr<Directory> root;// = build_dir_wrap(p);
-	//root->ls(4);
-	//out("\n\n");
+	std::shared_ptr<Directory> root;
 
 	while (!quit) {
 		boost::array<char, 1024> buf;
@@ -273,7 +268,7 @@ void clientHandler(tcp::socket& socket)
 				break;
 
 			case RNM_ELEMENT:
-				// TO DO: rinomina file o path
+				rnmEl(socket, root, request_stream);
 				break;
 
 			case START_SEND_FILE:
