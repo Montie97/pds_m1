@@ -14,7 +14,7 @@ public:
     Directory() = default;
     ~Directory() = default;
     void ls(int indent) const;
-    bool remove(const std::string& nome);
+    bool remove(std::string names);
     static std::shared_ptr<Directory> getRoot();
     std::shared_ptr<File> getFile(const std::string& name);
     std::shared_ptr<Directory> getDir(const std::string& name);

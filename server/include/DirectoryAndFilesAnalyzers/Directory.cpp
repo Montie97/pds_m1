@@ -147,11 +147,21 @@ void Directory::ls(int indent) const
         it->second->ls(indent + 4);
 }
 
-bool Directory::remove(const std::string& nome)
+bool Directory::remove(std::string name)
 {
-    if (nome == ".." || nome == ".")
+	std::shared_ptr<Directory> dir = shared_from_this();
+
+	if (name.find("/") != std::string::npos) {
+		std::string path = name.substr(0, name.rfind("/"));
+		name = name.substr(name.rfind("/") + 1, name.length());
+		dir = std::dynamic_pointer_cast<Directory>(searchDirEl(path));
+		if (dir == nullptr)
+			return false;
+	}
+
+    if (name == ".." || name == ".")
         return false;
-    if (this->children.erase(nome) == 1)
+    if (dir->children.erase(name) == 1)
         return true;
     return false;
 }

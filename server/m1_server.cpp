@@ -12,7 +12,7 @@
 using namespace boost::asio::ip;
 
 unsigned short tcp_port = 1234;
-enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, OK, NOT_OK, VERIFY_CHECKSUM, START_SEND_DIR, END_SEND_DIR, MK_DIR, RMV_DIR, RNM_DIR, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, RMV_FILE, RNM_FILE };
+enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, /*START_SEND_DIR, END_SEND_DIR,*/ MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE };
 
 
 void out(const std::string& str)
@@ -93,17 +93,20 @@ void verifyChecksum(tcp::socket& socket, std::shared_ptr<Directory>& root, std::
 	input_request_stream >> checksum;
 
 	std::shared_ptr<DirectoryElement> de = root->searchDirEl(path_name);
-	if (de == nullptr)
-		std::cout << "ECCEZIONE" << std::endl;
 
 	boost::asio::streambuf output_request;
 	std::ostream output_request_stream(&output_request);
 
-	if (de->getChecksum() == checksum) {
-		output_request_stream << NOT_OK << "\n\n";
+	if (de == nullptr) {
+		output_request_stream << MISSING_ELEMENT << "\n\n";
 	}
 	else {
-		output_request_stream << OK << "\n\n";
+		if (de->getChecksum() == checksum) {
+			output_request_stream << NOT_OK << "\n\n";
+		}
+		else {
+			output_request_stream << OK << "\n\n";
+		}
 	}
 
 	boost::asio::write(socket, output_request);
@@ -111,7 +114,35 @@ void verifyChecksum(tcp::socket& socket, std::shared_ptr<Directory>& root, std::
 
 void mkDir(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& input_request_stream)
 {
+	std::string path_name;
+	input_request_stream >> path_name;
 
+	boost::filesystem::path p(path_name);
+	boost::filesystem::create_directory(p);
+
+	std::shared_ptr<Directory> ptr = root->addDirectory(path_name);
+	if (!ptr) {
+		out("ECCEZZIONAZZA: per quale motivo la dir non è stata creata?");
+	}
+}
+
+void rmvEl(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& input_request_stream)
+{
+	std::string path_name;
+	input_request_stream >> path_name;
+
+	boost::filesystem::path p(path_name);
+	
+	if (boost::filesystem::exists(p)) {
+		boost::filesystem::remove(p);
+
+		if (!root->remove(path_name)) {
+			out("ECCEZZIONE: percorso sbagliato o file inesistente");
+		}
+	}
+	else {
+		out("File inesistente");
+	}
 }
 
 void clientHandler(tcp::socket& socket)
@@ -145,6 +176,10 @@ void clientHandler(tcp::socket& socket)
 
 			case MK_DIR:
 				mkDir(socket, root, request_stream);
+				break;
+
+			case RMV_ELEMENT:
+				rmvEl(socket, root, request_stream);
 				break;
 
 			case END_COMMUNICATION:
