@@ -261,18 +261,22 @@ void clientHandler(tcp::socket& socket)
 
 			case MK_DIR:
 				mkDir(socket, root, request_stream);
+				root->calculateChecksum();
 				break;
 
 			case RMV_ELEMENT:
 				rmvEl(socket, root, request_stream);
+				root->calculateChecksum();
 				break;
 
 			case RNM_ELEMENT:
 				rnmEl(socket, root, request_stream);
+				root->calculateChecksum();
 				break;
 
 			case START_SEND_FILE:
 				startSendingFile(socket, root, request_stream);
+				root->calculateChecksum();
 				break;
 
 			case END_COMMUNICATION:
