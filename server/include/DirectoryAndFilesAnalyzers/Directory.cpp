@@ -202,10 +202,7 @@ void Directory::calculateChecksum()
 	sha1->addBytes(this->name.c_str(), strlen(this->name.c_str()));
 
 	for (auto it = this->children.begin(); it != this->children.end(); ++it) {
-		if (it->second->getChecksum() == "") {
-			it->second->calculateChecksum();
-		}
-
+		it->second->calculateChecksum();
 		sha1->addBytes(it->second->getChecksum().c_str(), strlen(it->second->getChecksum().c_str()));
 	}
 

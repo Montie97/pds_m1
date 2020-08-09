@@ -41,8 +41,10 @@ std::string File::getChecksum()
 void File::calculateChecksum()
 {
 	SHA1* sha1 = new SHA1();
+	std::string size = boost::lexical_cast<std::string>(this->size);
+	std::string time_le = boost::lexical_cast<std::string>(this->last_edit);
 	sha1->addBytes(this->name.c_str(), strlen(this->name.c_str()));
-	std::string time_le = boost::lexical_cast<std::string>(this->last_edit).c_str();
+	sha1->addBytes(size.c_str(), strlen(size.c_str()));
 	sha1->addBytes(time_le.c_str(), strlen(time_le.c_str()));
 	
 	this->checksum = sha1->getDigestToHexString();
