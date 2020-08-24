@@ -21,4 +21,5 @@ public:
 	virtual void calculateChecksum() = 0;
 	std::weak_ptr<DirectoryElement> getParent() const { return this->parent; }
 	virtual std::string getPath() const = 0;
+	virtual bool isRoot() = 0;
 };

@@ -62,3 +62,7 @@ std::string File::getPath() const
 time_t File::getLastEdit() {
 	return this->last_edit;
 }
+
+bool File::isRoot() {
+	return false;
+}

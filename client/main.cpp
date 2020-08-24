@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <boost/filesystem.hpp>
 #include <boost/array.hpp>
 #include <boost/asio.hpp>
@@ -6,7 +7,7 @@
 
 using boost::asio::ip::tcp;
 
-enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, /*START_SEND_DIR, END_SEND_DIR,*/ MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE };
+enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, USERNAME_ALREADY_EXISTING, VERSION_MISMATCH };
 
 void build_dir(std::shared_ptr<Directory> dir, boost::filesystem::path p)
 {
@@ -211,15 +212,48 @@ void compareOldNewDir(std::shared_ptr<Directory> old_dir, std::shared_ptr<Direct
 	}
 }
 
+bool sendAuthenticationData(const std::string client_name, const std::string hashed_psw, const std::string root_name, tcp::socket& socket)
+{
+	const std::string authentication = client_name + '\n' + hashed_psw + '\n' + root_name;
+	boost::system::error_code error;
+	boost::asio::write(socket, boost::asio::buffer(authentication), error);
+	if (!error)
+		return true;
+	else
+		return false;
+}
+
 int main()
 {
-	std::string folder_path = "../Prova"; //Il path della directory da monitorare andrà poi specificato in altro modo
-	boost::filesystem::path p(folder_path);
+	//Lettura del file di configurazione
+	std::ifstream conf_file("../conf.txt");
+	std::string name;
+	std::string psw;
+	std::string root_name;
+	std::string directory_path;
+	std::string server_ip_port;
+	if (conf_file.is_open()) {
+		getline(conf_file, name);
+		getline(conf_file, psw);
+		getline(conf_file, root_name);
+		getline(conf_file, directory_path);
+		getline(conf_file, server_ip_port);
+	}
+	else {
+		std::cout << "Couldn't open configuration file" << std::endl;
+		return -1;
+	}
+	//Hash della password
+	SHA1* psw_sha1 = new SHA1();
+	psw_sha1->addBytes(psw.c_str(), strlen(psw.c_str()));
+	std::string hashed_psw = psw_sha1->getDigestToHexString();
+	//Costruzione dell'immagine
+	boost::filesystem::path p(directory_path);
 	std::shared_ptr<Directory> image_root = build_dir_wrap(p); //root dell'immagine del client
-	image_root->setName("root");
+	image_root->setName(root_name);
+	image_root->setIsRoot(true);
 	image_root->calculateChecksum();
 	//Connessione al server
-	std::string server_ip_port = "127.0.0.1:1234"; //L'IP e la porta del server saranno poi da specificare in altro modo
 	size_t pos = server_ip_port.find(':');
 	if (pos == std::string::npos)
 		return __LINE__;
@@ -240,6 +274,13 @@ int main()
 	if (error)
 		return __LINE__;
 	std::cout << "Connected to " << server_ip_port << std::endl;
+	//Invio di name, hashed_psw e root_name al server
+	if (!sendAuthenticationData(name, hashed_psw, root_name, socket)) {
+		std::cout << "Couldn't send authentication data to server" << std::endl;
+		return -1;
+	}
+	//Risposta da parte del server
+
 	//Loop di controllo (deve essere possibile chiuderlo)
 	while (true) {
 		image_root->ls(4);
@@ -247,19 +288,12 @@ int main()
 		std::this_thread::sleep_for(timespan);
 		std::cout << "checking..." << std::endl;
 		std::shared_ptr<Directory> current_root = build_dir_wrap(p); //root della directory corrente
-		current_root->setName("root");
+		current_root->setName(root_name);
+		current_root->setIsRoot(true);
 		current_root->calculateChecksum();
 		//current_root->ls(4);
 		compareOldNewDir(image_root, current_root, socket);
-		image_root = std::move(current_root);
+		image_root = std::move(current_root); //Aggiornamento dell'immagine
 	}
-
-	/*#define BYTES ""
-	SHA1* sha1 = new SHA1();
-	sha1->addBytes(BYTES, strlen(BYTES));
-	unsigned char* digest = sha1->getDigest();
-	sha1->hexPrinter(digest, 20);
-	delete sha1;
-	free(digest);*/
 	return 0;
 }

@@ -22,4 +22,5 @@ public:
 	std::string getPath() const;
 	static std::string getPathRec(std::shared_ptr<DirectoryElement> de);
 	time_t getLastEdit();
+	bool isRoot();
 };

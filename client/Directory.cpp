@@ -6,6 +6,7 @@ std::shared_ptr<Directory> Directory::makeDirectory(std::string name, std::weak_
 	dir->name = name;
 	dir->parent = parent;
 	dir->self = dir;
+	dir->is_root = false;
 	return dir;
 }
 
@@ -173,8 +174,7 @@ bool Directory::rename(std::string old_name, std::string new_name)
 	return true;
 }
 
-void Directory::setName(const std::string& new_name)
-{
+void Directory::setName(const std::string& new_name){
 	this->name = new_name;
 }
 
@@ -205,7 +205,7 @@ void Directory::setSelf(std::weak_ptr<Directory> self) {
 std::string Directory::getPathRec(std::shared_ptr<DirectoryElement> de)
 {
 	std::string path = "";
-	if (de->getName() != "root") {
+	if (!de->isRoot()) {
 		path = getPathRec(de->getParent().lock());
 		path += "/";
 	}
@@ -219,4 +219,12 @@ std::string Directory::getPath() const
 	std::shared_ptr<DirectoryElement> de = this->self.lock();
 	path = getPathRec(de);
 	return path;
+}
+
+bool Directory::isRoot() {
+	return this->is_root;
+}
+
+void Directory::setIsRoot(bool is_root) {
+	this->is_root = is_root;
 }
