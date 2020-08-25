@@ -9,6 +9,8 @@ using boost::asio::ip::tcp;
 
 enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, START_SYNC, END_SYNC, VERSION_MISMATCH };
 
+void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket); //Serve il prototipo perché c'è una ricorsione "indiretta" in sendDir" (sendDir chiama addedElement e addedElement chiama sendDir)
+
 void build_dir(std::shared_ptr<Directory> dir, boost::filesystem::path p)
 {
 	for (auto x : boost::filesystem::directory_iterator(p)){
@@ -27,13 +29,16 @@ void build_dir(std::shared_ptr<Directory> dir, boost::filesystem::path p)
 	}
 }
 
-std::shared_ptr<Directory> build_dir_wrap(boost::filesystem::path p)
+std::shared_ptr<Directory> build_dir_wrap(boost::filesystem::path p, std::string root_name)
 {
 	if (boost::filesystem::exists(p)) {
 		if (boost::filesystem::is_directory(p)) {
 			std::shared_ptr<Directory> root = std::make_shared<Directory>(Directory());
 			root->setSelf(root);
 			build_dir(root, p);
+			root->setName(root_name);
+			root->setIsRoot(true);
+			root->calculateChecksum();
 			return root;
 		}
 		else
@@ -221,15 +226,24 @@ void compareOldNewDir(std::shared_ptr<Directory> old_dir, std::shared_ptr<Direct
 	}
 }
 
-bool sendAuthenticationData(const std::string client_name, const std::string hashed_psw, const std::string root_name, tcp::socket& socket)
+int sendAuthenticationData(const std::string client_name, const std::string hashed_psw, const std::string root_name, tcp::socket& socket)
 {
-	const std::string authentication = client_name + '\n' + hashed_psw + '\n' + root_name;
+	//Invio dell'autenticazione
+	boost::asio::streambuf request_out;
+	std::ostream request_stream_out(&request_out);
+	request_stream_out << START_COMMUNICATION << '\n' << client_name << '\n' << hashed_psw << '\n' << root_name << "\n\n";
 	boost::system::error_code error;
-	boost::asio::write(socket, boost::asio::buffer(authentication), error);
-	if (!error)
-		return true;
-	else
-		return false;
+	boost::asio::write(socket, request_out, error);
+
+	//Ricezione della risposta
+	boost::array<char, 1024> buf;
+	boost::asio::streambuf request_in;
+	boost::asio::read_until(socket, request_in, "\n\n");
+	std::istream request_stream_in(&request_in);
+	int com_code;
+	request_stream_in >> com_code;
+	request_stream_in.read(buf.c_array(), 2); // eat the "\n\n"
+	return com_code;
 }
 
 void synchronizeElWithServer(std::shared_ptr<DirectoryElement> el, tcp::socket& socket)
@@ -288,11 +302,13 @@ int main()
 	std::string directory_path;
 	std::string server_ip_port;
 	if (conf_file.is_open()) {
+		std::cout << "Configuring client" << std::endl;
 		getline(conf_file, name);
 		getline(conf_file, psw);
 		getline(conf_file, root_name);
 		getline(conf_file, directory_path);
 		getline(conf_file, server_ip_port);
+		conf_file.close();
 	}
 	else {
 		std::cout << "Couldn't open configuration file" << std::endl;
@@ -304,14 +320,13 @@ int main()
 	std::string hashed_psw = psw_sha1->getDigestToHexString();
 	//Costruzione dell'immagine
 	boost::filesystem::path p(directory_path);
-	std::shared_ptr<Directory> image_root = build_dir_wrap(p); //root dell'immagine del client
-	image_root->setName(root_name);
-	image_root->setIsRoot(true);
-	image_root->calculateChecksum();
+	std::shared_ptr<Directory> image_root = build_dir_wrap(p, root_name); //root dell'immagine del client
 	//Connessione al server
 	size_t pos = server_ip_port.find(':');
-	if (pos == std::string::npos)
-		return __LINE__;
+	if (pos == std::string::npos) {
+		std::cout << "Invalid format for the ip:port pair" << std::endl;
+		return -1;
+	}
 	std::string server_port = server_ip_port.substr(pos + 1);
 	std::string server_ip = server_ip_port.substr(0, pos);
 	boost::asio::io_service io_service;
@@ -326,43 +341,32 @@ int main()
 		socket.close();
 		socket.connect(*endpoint_iterator++, error);
 	}
-	if (error)
-		return __LINE__;
+	if (error) {
+		std::cout << error.message() << std::endl;
+		return -1;
+	}
 	std::cout << "Connected to " << server_ip_port << std::endl;
 	//Invio di name, hashed_psw e root_name al server
-	if (!sendAuthenticationData(name, hashed_psw, root_name, socket)) {
-		std::cout << "Couldn't send authentication data to server" << std::endl;
+	std::cout << "Authenticating..." << std::endl;
+	if (sendAuthenticationData(name, hashed_psw, root_name, socket) == NOT_OK) {
+		std::cout << "Authentication failed" << std::endl;
 		return -1;
 	}
-	//Risposta da parte del server
-	boost::asio::streambuf receive_buffer;
-	boost::asio::read(socket, receive_buffer, boost::asio::transfer_all(), error);
-	if (error && error != boost::asio::error::eof) {
-		std::cout << "Couldn't receive confirmation from server: " << error.message() << std::endl;
-		return -1;
-	}
-	else {
-		const int data = boost::asio::buffer_cast<const int>(receive_buffer.data());
-		if (data == NOT_OK) {
-			std::cout << "Wrong password or username already existing (change conf.txt)" << std::endl;
-			return -1;
-		}
-	}
+	else
+		std::cout << "Authentication completed" << std::endl;
 	//Sincronizzazione con il server
 
 	//Loop di controllo (deve essere possibile chiuderlo)
-	while (true) {
+	/*while (true) {
 		image_root->ls(4);
 		std::chrono::milliseconds timespan(1000);
 		std::this_thread::sleep_for(timespan);
 		std::cout << "checking..." << std::endl;
 		std::shared_ptr<Directory> current_root = build_dir_wrap(p); //root della directory corrente
-		current_root->setName(root_name);
-		current_root->setIsRoot(true);
-		current_root->calculateChecksum();
 		//current_root->ls(4);
 		compareOldNewDir(image_root, current_root, socket);
 		image_root = std::move(current_root); //Aggiornamento dell'immagine
-	}
+	}*/
+	socket.close();
 	return 0;
 }
