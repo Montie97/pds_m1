@@ -7,7 +7,7 @@
 
 using boost::asio::ip::tcp;
 
-enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, USERNAME_ALREADY_EXISTING, VERSION_MISMATCH };
+enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, START_SYNC, END_SYNC, VERSION_MISMATCH };
 
 void build_dir(std::shared_ptr<Directory> dir, boost::filesystem::path p)
 {
@@ -100,6 +100,20 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket)
 	}
 }
 
+void sendDir(std::shared_ptr<Directory> dir, tcp::socket& socket)
+{
+	boost::asio::streambuf request;
+	std::ostream request_stream(&request);
+
+	std::cout << "Dir creata: " << dir->getPath() << "\n\n";
+	request_stream << MK_DIR << "\n" << dir->getPath() << "\n\n";
+	boost::asio::write(socket, request); // gestire errori
+
+	for (auto it = dir->getChildren().begin(); it != dir->getChildren().end(); ++it) {
+		addedElement(it->second, socket);
+	}
+}
+
 void sendModifiedFile(std::shared_ptr<File> file, tcp::socket& socket){
 	sendFile(file, socket);
 }
@@ -115,13 +129,8 @@ void removedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
 
 void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
 {
-	boost::asio::streambuf request;
-	std::ostream request_stream(&request);
-
 	if (de->type() == 0) { // è directory
-		std::cout << "Dir creata: " << de->getPath() << "\n\n";
-		request_stream << MK_DIR << "\n" << de->getPath() << "\n\n";
-		boost::asio::write(socket, request); // gestire errori
+		sendDir(std::dynamic_pointer_cast<Directory>(de), socket);
 	}
 	else {
 		sendFile(std::dynamic_pointer_cast<File>(de), socket);
@@ -223,6 +232,52 @@ bool sendAuthenticationData(const std::string client_name, const std::string has
 		return false;
 }
 
+void synchronizeElWithServer(std::shared_ptr<DirectoryElement> el, tcp::socket& socket)
+{
+	// Invio checksum e path dir da controllare
+	boost::asio::streambuf request_out;
+	std::ostream request_stream_out(&request_out);
+	request_stream_out << VERIFY_CHECKSUM << "\n" << el->getPath() << "\n" << el->getChecksum() << "\n\n";
+	boost::asio::write(socket, request_out); // gestire errori
+
+	// Ricevo messaggio dal server
+	boost::array<char, 1024> buf;
+	boost::asio::streambuf request_in;
+	boost::asio::read_until(socket, request_in, "\n\n");
+	std::istream request_stream_in(&request_in);
+	int com_code;
+	request_stream_in >> com_code;
+	request_stream_in.read(buf.c_array(), 2); // eat the "\n\n"
+
+	switch (com_code)
+	{
+	case OK:
+		std::cout << "Tutto bene!" << std::endl;
+		break;
+
+	case NOT_OK:
+		std::cout << "Directory modificata: " << el->getPath() << std::endl;
+		if (el->type() == 0) { // e' directory con all'interno qualcosa di modificato
+			std::shared_ptr<Directory> dir = std::dynamic_pointer_cast<Directory>(el);
+			for (auto it = dir->getChildren().begin(); it != dir->getChildren().end(); ++it) {
+				synchronizeElWithServer(it->second, socket);
+			}
+		}
+		else { // e' file modificato
+			sendFile(std::dynamic_pointer_cast<File>(el), socket);
+		}
+		break;
+
+	case MISSING_ELEMENT:
+		std::cout << "Directory mancante: " << el->getPath() << std::endl;
+		addedElement(el, socket);
+		break;
+
+	default:
+		std::cout << "Qualcosa di molto grave e' accaduto" << std::endl;
+	}
+}
+
 int main()
 {
 	//Lettura del file di configurazione
@@ -280,6 +335,20 @@ int main()
 		return -1;
 	}
 	//Risposta da parte del server
+	boost::asio::streambuf receive_buffer;
+	boost::asio::read(socket, receive_buffer, boost::asio::transfer_all(), error);
+	if (error && error != boost::asio::error::eof) {
+		std::cout << "Couldn't receive confirmation from server: " << error.message() << std::endl;
+		return -1;
+	}
+	else {
+		const int data = boost::asio::buffer_cast<const int>(receive_buffer.data());
+		if (data == NOT_OK) {
+			std::cout << "Wrong password or username already existing (change conf.txt)" << std::endl;
+			return -1;
+		}
+	}
+	//Sincronizzazione con il server
 
 	//Loop di controllo (deve essere possibile chiuderlo)
 	while (true) {
