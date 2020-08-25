@@ -96,6 +96,10 @@ bool checkRenamed(std::shared_ptr<Directory> dir1, std::shared_ptr<Directory> di
 }
 */
 
+/*
+void sendFile(std::shared_ptr<File> file, tcp::socket& socket);
+
+void sendDir(std::shared_ptr<Directory> dir, tcp::socket& socket);
 
 void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
 {
@@ -107,7 +111,6 @@ void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
 	}
 }
 
-void sendFile(std::shared_ptr<File> file, tcp::socket& socket);
 
 void sendDir(std::shared_ptr<Directory> dir, tcp::socket& socket)
 {
@@ -169,7 +172,7 @@ void synchronizeElWithServer(std::shared_ptr<DirectoryElement> el, tcp::socket& 
 		std::cout << "Qualcosa di molto grave e' accaduto" << std::endl;
 	}
 }
-
+*/
 
 
 void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& input_request_stream)
@@ -181,8 +184,10 @@ void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, s
 	input_request_stream >> hash_psw;
 	input_request_stream >> root_name;
 
+	std::cout << username << " " << hash_psw << " " << root_name << std::endl;
+
 	m_db_file.lock();
-	std::ifstream db_file("db.txt");
+	std::ifstream db_file("database.txt");
 	if (!db_file.is_open()) {
 		std::cerr << "failed to open database file" << std::endl;
 		return; // TO DO: GESTIRE ERRORE APERTURA FILE NETWORK
@@ -210,7 +215,7 @@ void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, s
 	db_file.close();
 
 	if (!user_found) { // Utente non trovato - si procede con la registrazione
-		std::ofstream db_file_out("db.txt", std::ios_base::binary);
+		std::ofstream db_file_out("database.txt", std::ios_base::binary | std::ios_base::app);
 		if (!db_file_out) {
 			std::cerr << "failed to open database file output" << std::endl;
 		}
@@ -227,6 +232,10 @@ void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, s
 	std::ostream output_request_stream(&output_request);
 
 	if (logged) {
+		boost::filesystem::path user_dir(username);
+		if (!boost::filesystem::exists(user_dir))
+			boost::filesystem::create_directory(user_dir);
+
 		if (!boost::filesystem::exists(p)) {
 			boost::filesystem::create_directory(p);
 			output_request_stream << OK << "\n\n"; // era NOT_OK
@@ -441,59 +450,69 @@ void clientHandler(tcp::socket& socket)
 		out("waiting for message");
 
 		boost::asio::streambuf request_buf;
-		boost::asio::read_until(socket, request_buf, "\n\n");
-		std::cout << "request size:" << request_buf.size() << "\n";
-		std::istream request_stream(&request_buf);
-		int com_code;
-		request_stream >> com_code;
-
-		switch (com_code) {
-			case START_COMMUNICATION:
-				startCommunication(socket, root, request_stream);
-				break;
-			
-			case VERIFY_CHECKSUM:
-				verifyChecksum(socket, root, request_stream);
-				break;
-
-			case START_SYNC:
-				setNotRemovedFlagsFalse(root);
-				break;
-
-			case END_SYNC:
-				removeNotFlaggedElements(root, root); // elimina tutti gli elementi non flaggati
-				break;
-
-			case MK_DIR:
-				mkDir(socket, root, request_stream);
-				root->calculateChecksum();
-				break;
-
-			case RMV_ELEMENT:
-				rmvEl(socket, root, request_stream);
-				root->calculateChecksum();
-				break;
-
-			case RNM_ELEMENT:
-				rnmEl(socket, root, request_stream);
-				root->calculateChecksum();
-				break;
-
-			case START_SEND_FILE:
-				startSendingFile(socket, root, request_stream);
-				root->calculateChecksum();
-				break;
-
-			case END_COMMUNICATION:
-				quit = true;
-				break;
-			
-			default: 
-				out("che succede?");
-				break;
+		boost::system::error_code error;
+		boost::asio::read_until(socket, request_buf, "\n\n", error);
+		if (error) {
+			std::cout << "Problema di connessione: " << error.message() << ", spegnimento client" << std::endl;
+			quit = true;
 		}
+		else {
+			std::cout << "request size: " << request_buf.size() << "\n";
+			std::istream request_stream(&request_buf);
+			int com_code;
+			request_stream >> com_code;
 
-		request_stream.read(buf.c_array(), 2); // eat the "\n\n"
+			std::cout << "com_code: " << com_code << std::endl;
+
+			switch (com_code) {
+				case START_COMMUNICATION:
+					out("Start communication");
+					startCommunication(socket, root, request_stream);
+					break;
+
+				case VERIFY_CHECKSUM:
+					verifyChecksum(socket, root, request_stream);
+					break;
+
+				case START_SYNC:
+					setNotRemovedFlagsFalse(root);
+					break;
+
+				case END_SYNC:
+					removeNotFlaggedElements(root, root); // elimina tutti gli elementi non flaggati
+					break;
+
+				case MK_DIR:
+					mkDir(socket, root, request_stream);
+					root->calculateChecksum();
+					break;
+
+				case RMV_ELEMENT:
+					rmvEl(socket, root, request_stream);
+					root->calculateChecksum();
+					break;
+
+				case RNM_ELEMENT:
+					rnmEl(socket, root, request_stream);
+					root->calculateChecksum();
+					break;
+
+				case START_SEND_FILE:
+					startSendingFile(socket, root, request_stream);
+					root->calculateChecksum();
+					break;
+
+				case END_COMMUNICATION:
+					quit = true;
+					break;
+
+				default:
+					out("che succede?");
+					break;
+			}
+
+			request_stream.read(buf.c_array(), 2); // eat the "\n\n"
+		}
 	}
 }
 

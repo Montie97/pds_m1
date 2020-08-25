@@ -85,7 +85,7 @@ std::shared_ptr<DirectoryElement> Directory::searchDirEl(const std::string& _pat
 		token = path.substr(0, pos);
 
 		if (token == "..") {
-			curr_dir = curr_dir->parent.lock();
+			curr_dir = std::dynamic_pointer_cast<Directory>(curr_dir->parent.lock()); // DA CAMBIARE QUANDO IL PARENT TORNERA Directory
 		}
 		else if (token == ".") {
 			curr_dir = curr_dir->self.lock();

@@ -9,7 +9,7 @@ class DirectoryElement
 protected:
 	std::string name;
 	std::string checksum = "";
-	std::weak_ptr<DirectoryElement> parent;
+	std::weak_ptr<DirectoryElement> parent; // METTERE DIRECTORY PRIMA O POI
 	bool check_not_removed_flag;
 
 public:
