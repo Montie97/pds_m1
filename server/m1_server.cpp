@@ -7,12 +7,14 @@
 #include <boost/array.hpp>
 #include <string>
 #include <boost/filesystem.hpp>
+#include <mutex>
 #include "DirectoryAndFilesAnalyzers/Directory.h"
 #include "sha1/sha1.h"
 using namespace boost::asio::ip;
 
+std::mutex m_db_file;
 unsigned short tcp_port = 1234;
-enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, /*START_SEND_DIR, END_SEND_DIR,*/ MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE };
+enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, START_SYNC, END_SYNC, VERSION_MISMATCH };
 
 
 void out(const std::string& str)
@@ -42,7 +44,8 @@ std::shared_ptr<Directory> build_dir_wrap(boost::filesystem::path p)
 {
 	if (boost::filesystem::exists(p)) {
 		if (boost::filesystem::is_directory(p)) {
-			std::shared_ptr<Directory> root = Directory::getRoot();
+			std::shared_ptr<Directory> root = std::make_shared<Directory>(Directory());
+			root->setName("/");
 			build_dir(root, p);
 			root->calculateChecksum();
 			return root;
@@ -63,23 +66,179 @@ std::shared_ptr<Directory> build_dir_wrap(boost::filesystem::path p)
 	boost::asio::write(socket, request);
 */
 
+/*
+bool compareChecksum(std::shared_ptr<DirectoryElement> old_dir, std::shared_ptr<DirectoryElement> new_dir)
+{
+	return old_dir->getChecksum() == new_dir->getChecksum();
+}
+
+bool checkRenamed(std::shared_ptr<Directory> dir1, std::shared_ptr<Directory> dir2)
+{
+	// se il numero di file all'interno delle dir è diverso, ritorna false
+	if (dir1->getChildren().size() != dir2->getChildren().size()) {
+		return false;
+	}
+
+	for (auto it = dir1->getChildren().begin(); it != dir1->getChildren().end(); ++it)
+	{
+		if (dir2->getChildren().count(it->first) > 0) { // il nome esiste in dir2
+			if (!compareChecksum(it->second, dir2->getChildren()[it->first])) { // se checksum disuguali ritorna false
+				return false;
+			}
+		}
+		else { // se un nome non è presente in dir2, ritorna false
+			return false;
+		}
+	}
+
+	// tutti i file hanno la relativa controparte con lo stesso nome e lo stesso checksum in entrambe le dir
+	return true;
+}
+*/
+
+
+void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
+{
+	if (de->type() == 0) { // è directory
+		sendDir(std::dynamic_pointer_cast<Directory>(de), socket);
+	}
+	else {
+		sendFile(std::dynamic_pointer_cast<File>(de), socket);
+	}
+}
+
+void sendFile(std::shared_ptr<File> file, tcp::socket& socket);
+
+void sendDir(std::shared_ptr<Directory> dir, tcp::socket& socket)
+{
+	boost::asio::streambuf request;
+	std::ostream request_stream(&request);
+
+	std::cout << "Dir creata: " << dir->getPath() << "\n\n";
+	request_stream << MK_DIR << "\n" << dir->getPath() << "\n\n";
+	boost::asio::write(socket, request); // gestire errori
+
+	for (auto it = dir->getChildren().begin(); it != dir->getChildren().end(); ++it) {
+		addedElement(it->second, socket);
+	}
+}
+
+
+void synchronizeElWithServer(std::shared_ptr<DirectoryElement> el, tcp::socket& socket)
+{
+	// Invio checksum e path dir da controllare
+	boost::asio::streambuf request_out;
+	std::ostream request_stream_out(&request_out);
+	request_stream_out << VERIFY_CHECKSUM << "\n" << el->getPath() << "\n" << el->getChecksum() << "\n\n";
+	boost::asio::write(socket, request_out); // gestire errori
+
+	// Ricevo messaggio dal server
+	boost::array<char, 1024> buf;
+	boost::asio::streambuf request_in;
+	boost::asio::read_until(socket, request_in, "\n\n");
+	std::istream request_stream_in(&request_in);
+	int com_code;
+	request_stream_in >> com_code;
+	request_stream_in.read(buf.c_array(), 2); // eat the "\n\n"
+
+	switch (com_code)
+	{
+	case OK:
+		std::cout << "Tutto bene!" << std::endl;
+		break;
+
+	case NOT_OK:
+		std::cout << "Directory modificata: " << el->getPath() << std::endl;
+		if (el->type() == 0) { // e' directory con all'interno qualcosa di modificato
+			std::shared_ptr<Directory> dir = std::dynamic_pointer_cast<Directory>(el);
+			for (auto it = dir->getChildren().begin(); it != dir->getChildren().end(); ++it) {
+				synchronizeElWithServer(it->second, socket);
+			}
+		}
+		else { // e' file modificato
+			sendFile(std::dynamic_pointer_cast<File>(el), socket);
+		}
+		break;
+
+	case MISSING_ELEMENT:
+		std::cout << "Directory mancante: " << el->getPath() << std::endl;
+		addedElement(el, socket);
+		break;
+
+	default:
+		std::cout << "Qualcosa di molto grave e' accaduto" << std::endl;
+	}
+}
+
+
+
 void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& input_request_stream)
 {
-	std::string root_path_name;
-	input_request_stream >> root_path_name;
-	boost::filesystem::path p(root_path_name);
+	std::string username;
+	std::string hash_psw;
+	std::string root_name;
+	input_request_stream >> username;
+	input_request_stream >> hash_psw;
+	input_request_stream >> root_name;
+
+	m_db_file.lock();
+	std::ifstream db_file("db.txt");
+	if (!db_file.is_open()) {
+		std::cerr << "failed to open database file" << std::endl;
+		return; // TO DO: GESTIRE ERRORE APERTURA FILE NETWORK
+	}
+
+	// Procedura di autenticazione - ricerca di utente in database
+	std::string db_curr_username;
+	std::string db_curr_hash_psw;
+	bool logged = false;
+	bool user_found = false;
+	while (!db_file.eof()) {
+		db_file >> db_curr_username;
+		db_file >> db_curr_hash_psw;
+
+		if (db_curr_username == username) {
+			user_found = true;
+			if (db_curr_hash_psw == hash_psw) {
+				logged = true;
+			}
+			else {
+				break;
+			}
+		}
+	}
+	db_file.close();
+
+	if (!user_found) { // Utente non trovato - si procede con la registrazione
+		std::ofstream db_file_out("db.txt", std::ios_base::binary);
+		if (!db_file_out) {
+			std::cerr << "failed to open database file output" << std::endl;
+		}
+
+		db_file_out << username << " " << hash_psw << "\n";
+		db_file_out.close();
+		logged = true;
+	}
+	m_db_file.unlock();
+
+	boost::filesystem::path p(username+"/"+root_name);  // es: alessandro/musica (l'utente "alessandro" salva in remoto la sua cartella locale "musica")
 
 	boost::asio::streambuf output_request;
 	std::ostream output_request_stream(&output_request);
 
-	if (!boost::filesystem::exists(p)) {
-		boost::filesystem::create_directory(p);
-		output_request_stream << NOT_OK << "\n\n";
+	if (logged) {
+		if (!boost::filesystem::exists(p)) {
+			boost::filesystem::create_directory(p);
+			output_request_stream << OK << "\n\n"; // era NOT_OK
+		}
+		else {
+			output_request_stream << OK << "\n\n";
+		}
+		root = build_dir_wrap(p);
 	}
 	else {
-		output_request_stream << OK << "\n\n";
+		output_request_stream << NOT_OK << "\n\n"; // era WRONG_PASSWORD
 	}
-	root = build_dir_wrap(p);
 
 	boost::asio::write(socket, output_request);
 	root->ls(4);
@@ -101,6 +260,7 @@ void verifyChecksum(tcp::socket& socket, std::shared_ptr<Directory>& root, std::
 		output_request_stream << MISSING_ELEMENT << "\n\n";
 	}
 	else {
+		de->setCheckNotRemovedFlag(true); // flaggo l'elemento appena verificato, significa che esiste ancora lato client
 		if (de->getChecksum() == checksum) {
 			output_request_stream << NOT_OK << "\n\n";
 		}
@@ -110,6 +270,41 @@ void verifyChecksum(tcp::socket& socket, std::shared_ptr<Directory>& root, std::
 	}
 
 	boost::asio::write(socket, output_request);
+}
+
+void setNotRemovedFlagsFalse(std::shared_ptr<Directory>& dir)
+{
+	dir->setCheckNotRemovedFlag(false);
+	for (auto it = dir->getChildren().begin(); it != dir->getChildren().end(); ++it) {
+		if (it->second->type() == 0) { // e' dir
+			std::shared_ptr<Directory> sdir = std::dynamic_pointer_cast<Directory>(it->second);
+			setNotRemovedFlagsFalse(sdir);
+		}
+		else { // e' file
+			it->second->setCheckNotRemovedFlag(false);
+		}
+	}
+}
+
+void removeNotFlaggedElements(std::shared_ptr<Directory>& root, std::shared_ptr<Directory>& dir)
+{
+	if (dir->getCheckNotRemovedFlag() == false) {
+		root->remove(dir->getPath().substr(dir->getPath().find_first_of("/"), dir->getPath().length())); // rimuove la root dal path
+	}
+	else {
+		for (auto it = dir->getChildren().begin(); it != dir->getChildren().end(); ++it) {
+			if (it->second->type() == 0) { // e' dir
+				std::shared_ptr<Directory> sdir = std::dynamic_pointer_cast<Directory>(it->second);
+				removeNotFlaggedElements(root, sdir);
+			}
+			else { // e' file
+				if (it->second->getCheckNotRemovedFlag() == false) {
+					root->remove(it->second->getPath().substr(it->second->getPath().find_first_of("/"), it->second->getPath().length())); // rimuove la root dal path
+
+				}
+			}
+		}
+	}
 }
 
 void mkDir(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& input_request_stream)
@@ -192,12 +387,13 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, std
 	while (true) {
 		// Inizializzazione dei buffer necessari per ricevere il messaggio di trasmissione file intermedio
 		// (SENDING_FILE o END_SEND_FILE)
-		boost::asio::streambuf request_buf;
+		/*boost::asio::streambuf request_buf;
 		boost::asio::read_until(socket, request_buf, "\n\n");
 		std::cout << "request size:" << request_buf.size() << "\n";
-		std::istream input_request_stream(&request_buf);
+		std::istream input_request_stream(&request_buf);*/
 		int com_code;
 		input_request_stream >> com_code;
+		input_request_stream.read(buf.c_array(), 2); // eat the "\n\n"
 
 		if (com_code == SENDING_FILE) {
 			// Legge bytes trasmessi e li scrive su file
@@ -242,6 +438,7 @@ void clientHandler(tcp::socket& socket)
 
 	while (!quit) {
 		boost::array<char, 1024> buf;
+		out("waiting for message");
 
 		boost::asio::streambuf request_buf;
 		boost::asio::read_until(socket, request_buf, "\n\n");
@@ -257,6 +454,14 @@ void clientHandler(tcp::socket& socket)
 			
 			case VERIFY_CHECKSUM:
 				verifyChecksum(socket, root, request_stream);
+				break;
+
+			case START_SYNC:
+				setNotRemovedFlagsFalse(root);
+				break;
+
+			case END_SYNC:
+				removeNotFlaggedElements(root, root); // elimina tutti gli elementi non flaggati
 				break;
 
 			case MK_DIR:
@@ -294,11 +499,11 @@ void clientHandler(tcp::socket& socket)
 
 int main()
 {
-	std::string folder_path = "../_test_folder";
+	/*std::string folder_path = "../_test_folder";
 	boost::filesystem::path p(folder_path);
 	std::shared_ptr<Directory> root = build_dir_wrap(p);
 	root->ls(0);
-	return 5;
+	return 5;*/
 
 
 	// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
