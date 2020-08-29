@@ -208,8 +208,10 @@ std::string Directory::getPathRec(std::shared_ptr<DirectoryElement> de)
 	if (!de->isRoot()) {
 		path = getPathRec(de->getParent().lock());
 		path += "/";
+		path += de->getName();
 	}
-	path += de->getName();
+	else
+		path = '.';
 	return path;
 }
 

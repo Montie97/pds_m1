@@ -44,10 +44,13 @@ void File::calculateChecksum()
 std::string File::getPathRec(std::shared_ptr<DirectoryElement> de)
 {
 	std::string path = "";
-	if (de->getParent().lock() != nullptr)
+	if (de->getParent().lock() != nullptr) {
 		path = getPathRec(de->getParent().lock());
-	path += "/";
-	path += de->getName();
+		path += "/";
+		path += de->getName();
+	}
+	else
+		path = '.';
 	return path;
 }
 

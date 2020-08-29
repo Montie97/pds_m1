@@ -9,7 +9,7 @@ using boost::asio::ip::tcp;
 
 enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, START_SYNC, END_SYNC, VERSION_MISMATCH };
 
-void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket); //Serve il prototipo perché c'è una ricorsione "indiretta" in sendDir" (sendDir chiama addedElement e addedElement chiama sendDir)
+void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket, std::string directory_path); //Serve il prototipo perché c'è una ricorsione "indiretta" in sendDir" (sendDir chiama addedElement e addedElement chiama sendDir)
 
 void build_dir(std::shared_ptr<Directory> dir, boost::filesystem::path p)
 {
@@ -38,6 +38,7 @@ std::shared_ptr<Directory> build_dir_wrap(boost::filesystem::path p, std::string
 			build_dir(root, p);
 			root->setName(root_name);
 			root->setIsRoot(true);
+			root->setSelf(root);
 			root->calculateChecksum();
 			return root;
 		}
@@ -53,12 +54,12 @@ bool compareChecksum(std::shared_ptr<DirectoryElement> old_dir, std::shared_ptr<
 	return old_dir->getChecksum() == new_dir->getChecksum();
 }
 
-void sendFile(std::shared_ptr<File> file, tcp::socket& socket)
+void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string directory_path)
 {
 	boost::system::error_code error;
 	boost::array<char, 1024> buf;
-	std::ifstream source_file(file->getPath(), std::ios_base::binary | std::ios_base::ate);
-	if (!source_file) {
+	std::ifstream source_file(directory_path + '/' + file->getPath(), std::ios_base::binary | std::ios_base::ate);
+	if (!source_file.is_open()) {
 		std::cout << "failed to open: " << file->getPath() << std::endl;
 		return; // throws exception?
 	}
@@ -86,11 +87,25 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket)
 
 				request_stream << SENDING_FILE << "\n\n";
 				boost::asio::write(socket, request);
-
-				boost::asio::write(socket, boost::asio::buffer(buf.c_array(), source_file.gcount()), boost::asio::transfer_all(), error);
-				if (error) {
-					std::cout << "send error: " << error << std::endl;
-					return; // throws exception?
+				//Aspetto l'OK del server (serve separare l'invio di SENDING_FILE dall'invio del contenuto)
+				boost::array<char, 1024> eat_buf;
+				boost::asio::streambuf request_in;
+				boost::asio::read_until(socket, request_in, "\n\n");
+				std::istream request_stream_in(&request_in);
+				int com_code;
+				request_stream_in >> com_code;
+				request_stream_in.read(eat_buf.c_array(), 2); // eat the "\n\n"
+				//Invio il contenuto del file
+				if (com_code == OK) {
+					boost::asio::write(socket, boost::asio::buffer(buf.c_array(), source_file.gcount()), boost::asio::transfer_all(), error);
+					if (error) {
+						std::cout << "send error: " << error << std::endl;
+						return; // throws exception?
+					}
+				}
+				else {
+					std::cout << "Server did not reply with ok" << std::endl;
+					return;
 				}
 			}
 			else {
@@ -105,22 +120,23 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket)
 	}
 }
 
-void sendDir(std::shared_ptr<Directory> dir, tcp::socket& socket)
+void sendDir(std::shared_ptr<Directory> dir, tcp::socket& socket, std::string directory_path)
 {
 	boost::asio::streambuf request;
 	std::ostream request_stream(&request);
 
-	std::cout << "Dir creata: " << dir->getPath() << "\n\n";
+	//std::cout << "Dir creata: " << dir->getPath() << "\n\n";
 	request_stream << MK_DIR << "\n" << dir->getPath() << "\n\n";
 	boost::asio::write(socket, request); // gestire errori
 
-	for (auto it = dir->getChildren().begin(); it != dir->getChildren().end(); ++it) {
-		addedElement(it->second, socket);
+	auto dir_children = dir->getChildren();
+	for (auto it = dir_children.begin(); it != dir_children.end(); ++it) {
+		addedElement(it->second, socket, directory_path);
 	}
 }
 
-void sendModifiedFile(std::shared_ptr<File> file, tcp::socket& socket){
-	sendFile(file, socket);
+void sendModifiedFile(std::shared_ptr<File> file, tcp::socket& socket, std::string directory_path){
+	sendFile(file, socket, directory_path);
 }
 
 void removedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
@@ -132,13 +148,13 @@ void removedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
 	boost::asio::write(socket, request); // gestire errori
 }
 
-void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
+void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket, std::string directory_path)
 {
 	if (de->type() == 0) { // è directory
-		sendDir(std::dynamic_pointer_cast<Directory>(de), socket);
+		sendDir(std::dynamic_pointer_cast<Directory>(de), socket, directory_path);
 	}
 	else {
-		sendFile(std::dynamic_pointer_cast<File>(de), socket);
+		sendFile(std::dynamic_pointer_cast<File>(de), socket, directory_path);
 	}
 }
 
@@ -165,7 +181,7 @@ bool checkRenamed(std::shared_ptr<Directory> dir1, std::shared_ptr<Directory> di
 	return true;
 }
 
-void compareOldNewDir(std::shared_ptr<Directory> old_dir, std::shared_ptr<Directory> new_dir, tcp::socket& socket)
+void compareOldNewDir(std::shared_ptr<Directory> old_dir, std::shared_ptr<Directory> new_dir, tcp::socket& socket, std::string directory_path)
 {
 	std::vector<std::shared_ptr<DirectoryElement>> removedOrRenamed;
 	std::vector<std::shared_ptr<DirectoryElement>> addedOrRenamed;
@@ -182,11 +198,11 @@ void compareOldNewDir(std::shared_ptr<Directory> old_dir, std::shared_ptr<Direct
 					if (it_old->second->type() == 0) { //Se è una directory => discesa ricorsiva
 						std::shared_ptr<Directory> old_dir_child = std::dynamic_pointer_cast<Directory>(it_old->second);
 						std::shared_ptr<Directory> new_dir_child = std::dynamic_pointer_cast<Directory>(it_new->second);
-						compareOldNewDir(old_dir_child, new_dir_child, socket);
+						compareOldNewDir(old_dir_child, new_dir_child, socket, directory_path);
 					}
 					else { //Se è un file => invia direttamente il file modificato
 						std::shared_ptr<File> file_to_send = std::dynamic_pointer_cast<File>(it_new->second);
-						sendModifiedFile(file_to_send, socket);
+						sendModifiedFile(file_to_send, socket, directory_path);
 					}
 				}
 			}
@@ -221,7 +237,7 @@ void compareOldNewDir(std::shared_ptr<Directory> old_dir, std::shared_ptr<Direct
 			removedElement(removedOrRenamed[i], socket);
 		}
 		for (int i = 0; i < addedOrRenamed.size(); i++) {
-			addedElement(addedOrRenamed[i], socket);
+			addedElement(addedOrRenamed[i], socket, directory_path);
 		}
 	}
 }
@@ -246,7 +262,7 @@ int sendAuthenticationData(const std::string client_name, const std::string hash
 	return com_code;
 }
 
-void synchronizeElWithServer(std::shared_ptr<DirectoryElement> el, tcp::socket& socket)
+void synchronizeElWithServer(std::shared_ptr<DirectoryElement> el, tcp::socket& socket, std::string directory_path)
 {
 	// Invio checksum e path dir da controllare
 	boost::asio::streambuf request_out;
@@ -266,30 +282,48 @@ void synchronizeElWithServer(std::shared_ptr<DirectoryElement> el, tcp::socket& 
 	switch (com_code)
 	{
 	case OK:
-		std::cout << "Tutto bene!" << std::endl;
+		std::cout << "Server is already up to date" << std::endl;
 		break;
 
 	case NOT_OK:
-		std::cout << "Directory modificata: " << el->getPath() << std::endl;
+		std::cout << "Directory modified: " << el->getPath() << std::endl;
 		if (el->type() == 0) { // e' directory con all'interno qualcosa di modificato
 			std::shared_ptr<Directory> dir = std::dynamic_pointer_cast<Directory>(el);
-			for (auto it = dir->getChildren().begin(); it != dir->getChildren().end(); ++it) {
-				synchronizeElWithServer(it->second, socket);
+			auto dir_children = dir->getChildren();
+			for (auto it = dir_children.begin(); it != dir_children.end(); ++it) {
+				synchronizeElWithServer(it->second, socket, directory_path);
 			}
 		}
 		else { // e' file modificato
-			sendFile(std::dynamic_pointer_cast<File>(el), socket);
+			sendFile(std::dynamic_pointer_cast<File>(el), socket, directory_path);
 		}
 		break;
 
 	case MISSING_ELEMENT:
-		std::cout << "Directory mancante: " << el->getPath() << std::endl;
-		addedElement(el, socket);
+		std::cout << "Directory missing: " << el->getPath() << std::endl;
+		addedElement(el, socket, directory_path);
 		break;
 
 	default:
-		std::cout << "Qualcosa di molto grave e' accaduto" << std::endl;
+		std::cout << "Some weird error happened" << std::endl;
 	}
+}
+
+void synchronizeWithServer(tcp::socket& socket, std::shared_ptr<Directory> image_root, std::string directory_path)
+{
+	//Invio il communication code al server
+	boost::asio::streambuf request_out;
+	std::ostream request_stream_out(&request_out);
+	request_stream_out << START_SYNC << "\n\n";
+	boost::system::error_code error;
+	boost::asio::write(socket, request_out, error);
+	//Invio la root al server
+	std::cout << "Synch with server started" << std::endl;
+	synchronizeElWithServer(image_root, socket, directory_path);
+	std::cout << "Synch with server completed" << std::endl;
+	//Termino la sincronizzazione
+	request_stream_out << END_SYNC << "\n\n";
+	boost::asio::write(socket, request_out, error);
 }
 
 int main()
@@ -354,8 +388,8 @@ int main()
 	}
 	else
 		std::cout << "Authentication completed" << std::endl;
-	//Sincronizzazione con il server
-
+	//Sincronizzazione dell'immagine con il server
+	synchronizeWithServer(socket, image_root, directory_path);
 	//Loop di controllo (deve essere possibile chiuderlo)
 	/*while (true) {
 		image_root->ls(4);
@@ -367,6 +401,6 @@ int main()
 		compareOldNewDir(image_root, current_root, socket);
 		image_root = std::move(current_root); //Aggiornamento dell'immagine
 	}*/
-	socket.close();
+	//socket.close();
 	return 0;
 }
