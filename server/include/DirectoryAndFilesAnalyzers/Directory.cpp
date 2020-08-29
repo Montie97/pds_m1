@@ -79,9 +79,12 @@ std::shared_ptr<DirectoryElement> Directory::searchDirEl(const std::string& _pat
 
 	std::string delimiter = "/";
 	std::string token;
-	size_t pos = 0;
+	size_t pos = -1;
 
-	while ((pos = path.find(delimiter)) != std::string::npos) {
+	if ((pos = path.find(delimiter)) == std::string::npos)
+		pos = path.length();
+
+	do{
 		token = path.substr(0, pos);
 
 		if (token == "..") {
@@ -92,9 +95,13 @@ std::shared_ptr<DirectoryElement> Directory::searchDirEl(const std::string& _pat
 		}
 		else {
 			if (curr_dir->children.count(token) != 0) {    // Se ha trovato un match
+				if (curr_dir->children[token]->type() == 1) { // e' file
+					return curr_dir->children[token];
+				}
+
 				curr_dir = std::dynamic_pointer_cast<Directory>(curr_dir->children[token]);
-				if (!curr_dir)
-					std::cout << "ECCEZIONE, TROVATO FILE DI MEZZO" << std::endl;
+				/*if (!curr_dir)
+					std::cout << "ECCEZIONE, TROVATO FILE DI MEZZO" << std::endl;*/
 			}
 			else {
 				return std::shared_ptr<Directory>(nullptr);
@@ -102,7 +109,10 @@ std::shared_ptr<DirectoryElement> Directory::searchDirEl(const std::string& _pat
 		}
 
 		path.erase(0, pos + delimiter.length());
-	}
+		if ((pos = path.find(delimiter)) == std::string::npos)
+			pos = path.length();
+
+	} while (path.length() != 0);
 
 	return curr_dir;
 }
