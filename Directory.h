@@ -1,13 +1,15 @@
+#pragma once
+
+#include "DirectoryElement.h"
 #include "File.h"
-#include "sha1.h"
 #include <exception>
 
 class Directory : public DirectoryElement, public std::enable_shared_from_this<Directory>
 {
 private:
     std::weak_ptr<Directory> self;
-    std::weak_ptr<Directory> parent;
     std::map<std::string, std::shared_ptr<DirectoryElement>> children;
+    bool is_root;
 
 public:
 
@@ -25,7 +27,11 @@ public:
     std::shared_ptr<File> addFile(std::string name, uintmax_t size, time_t last_edit);
     static std::shared_ptr<Directory> makeDirectory(std::string name, std::weak_ptr<Directory> parent);
     void setName(const std::string& new_name);
-    std::string getChecksum();
     void calculateChecksum();
     std::map<std::string, std::shared_ptr<DirectoryElement>> getChildren();
+    void setSelf(std::weak_ptr<Directory> self);
+    std::string getPath() const;
+    static std::string getPathRec(std::shared_ptr<DirectoryElement> de);
+    bool isRoot();
+    void setIsRoot(bool is_root);
 };

@@ -6,6 +6,7 @@ std::shared_ptr<Directory> Directory::makeDirectory(std::string name, std::weak_
 	dir->name = name;
 	dir->parent = parent;
 	dir->self = dir;
+	dir->is_root = false;
 	return dir;
 }
 
@@ -49,7 +50,7 @@ std::shared_ptr<File> Directory::addFile(std::string name, uintmax_t size, time_
 	if (search != dir->children.end())
 		return std::shared_ptr<File>(nullptr);
 	else {
-		std::shared_ptr<File> f = File::makeFile(name, size, last_edit);
+		std::shared_ptr<File> f = File::makeFile(name, size, last_edit, std::weak_ptr<Directory>(dir));
 		dir->children.insert({ name, f });
 		return f;
 	}
@@ -84,7 +85,7 @@ std::shared_ptr<DirectoryElement> Directory::searchDirEl(const std::string& _pat
 		token = path.substr(0, pos);
 
 		if (token == "..") {
-			curr_dir = curr_dir->parent.lock();
+			curr_dir = std::dynamic_pointer_cast<Directory>(curr_dir->parent.lock()); //Serve questo cast perché parent è std::shared_ptr<DirectoryElement>
 		}
 		else if (token == ".") {
 			curr_dir = curr_dir->self.lock();
@@ -126,7 +127,10 @@ void Directory::ls(int indent) const
 {
 	for (int i = 0; i < indent; i++)
 		std::cout << " ";
-	std::cout << "[+] " << this->name << " {" << this->checksum << "}" << std::endl;
+	std::cout << "[+] " << this->name << " {" << this->checksum << "}";
+	if (this->parent.lock() != nullptr)
+		std::cout << " (parent: " << this->parent.lock()->getName() << ")";
+	std::cout << " [path: " << this->getPath() << "]" << std::endl;
 	for (auto it = this->children.begin(); it != this->children.end(); ++it)
 		it->second->ls(indent + 4);
 }
@@ -170,14 +174,8 @@ bool Directory::rename(std::string old_name, std::string new_name)
 	return true;
 }
 
-void Directory::setName(const std::string& new_name)
-{
+void Directory::setName(const std::string& new_name){
 	this->name = new_name;
-}
-
-std::string Directory::getChecksum()
-{
-	return this->checksum;
 }
 
 void Directory::calculateChecksum()
@@ -198,4 +196,37 @@ void Directory::calculateChecksum()
 
 std::map<std::string, std::shared_ptr<DirectoryElement>> Directory::getChildren(){
 	return this->children;
+}
+
+void Directory::setSelf(std::weak_ptr<Directory> self) {
+	this->self = self;
+}
+
+std::string Directory::getPathRec(std::shared_ptr<DirectoryElement> de)
+{
+	std::string path = "";
+	if (!de->isRoot()) {
+		path = getPathRec(de->getParent().lock());
+		path += "/";
+		path += de->getName();
+	}
+	else
+		path = '.';
+	return path;
+}
+
+std::string Directory::getPath() const
+{
+	std::string path;
+	std::shared_ptr<DirectoryElement> de = this->self.lock();
+	path = getPathRec(de);
+	return path;
+}
+
+bool Directory::isRoot() {
+	return this->is_root;
+}
+
+void Directory::setIsRoot(bool is_root) {
+	this->is_root = is_root;
 }

@@ -1,4 +1,4 @@
-#ifndef SHA1_HEADER
+#pragma once
 
 #include <string>
 
@@ -24,6 +24,3 @@ public:
 	static void hexPrinter(unsigned char* c, int l);
 	std::string getDigestToHexString();
 };
-
-#define SHA1_HEADER
-#endif
