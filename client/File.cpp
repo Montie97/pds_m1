@@ -20,7 +20,7 @@ void File::ls(int indent) const
 {
 	for (int i = 0; i < indent; i++)
 		std::cout << " ";
-	std::cout << this->name << " (" << this->size << "B" << ") {" << this->checksum << "}" << " (parent: " << this->parent.lock()->getName() << ")" << " [path: " << this->getPath() << "]" << std::endl;
+	std::cout << this->name << " (size: " << this->size << "B" << ") {checksum: " << this->checksum << "}" << " (parent: " << this->parent.lock()->getName() << ")" << " [path: " << this->getPath() << "]" << " (last edit: " << this->last_edit << ")" << std::endl;
 }
 
 int File::type() const{
@@ -34,8 +34,10 @@ void File::setName(const std::string& new_name){
 void File::calculateChecksum()
 {
 	SHA1* sha1 = new SHA1();
+	std::string size = boost::lexical_cast<std::string>(this->size);
+	std::string time_le = boost::lexical_cast<std::string>(this->last_edit);
 	sha1->addBytes(this->name.c_str(), strlen(this->name.c_str()));
-	std::string time_le = boost::lexical_cast<std::string>(this->last_edit).c_str();
+	sha1->addBytes(size.c_str(), strlen(size.c_str()));
 	sha1->addBytes(time_le.c_str(), strlen(time_le.c_str()));
 
 	this->checksum = sha1->getDigestToHexString();
