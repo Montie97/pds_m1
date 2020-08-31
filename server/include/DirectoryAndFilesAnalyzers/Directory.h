@@ -6,6 +6,7 @@ class Directory : public DirectoryElement, public std::enable_shared_from_this<D
 private:
     std::weak_ptr<Directory> self;
     std::map<std::string, std::shared_ptr<DirectoryElement>> children;
+	bool is_root;
 
 public:
 
@@ -31,4 +32,6 @@ public:
 	void setSelf(std::weak_ptr<Directory> self);
 	std::string getPath() const;
 	static std::string getPathRec(std::shared_ptr<DirectoryElement> de);
+	bool isRoot();
+	void setIsRoot(bool is_root);
 };

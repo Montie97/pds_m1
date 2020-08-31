@@ -47,6 +47,8 @@ std::shared_ptr<Directory> build_dir_wrap(boost::filesystem::path p, const std::
 			std::shared_ptr<Directory> root = std::make_shared<Directory>(Directory());
 			root->setName(rootname);
 			root->setSelf(root);
+			root->setIsRoot(true);
+			root->setSelf(root);
 			build_dir(root, p);
 			root->calculateChecksum();
 			return root;
@@ -253,6 +255,25 @@ void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, s
 	root->ls(4);
 }
 
+void setNotRemovedFlagsRecursive(std::shared_ptr<DirectoryElement> el, bool b)
+{
+	el->setCheckNotRemovedFlag(b);
+	if (el->type() == 0) { // e' dir
+		std::shared_ptr<Directory> dir = std::dynamic_pointer_cast<Directory>(el);
+		auto dir_children = dir->getChildren(); // boh
+		for (auto it = dir_children.begin(); it != dir_children.end(); ++it) {
+			if (it->second->type() == 0) { // e' dir
+				setNotRemovedFlagsRecursive(it->second, b);
+			}
+			else { // e' file
+				it->second->setCheckNotRemovedFlag(b);
+			}
+		}
+	}
+
+	// TODO: INVIA OK
+}
+
 void verifyChecksum(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& input_request_stream)
 {
 	std::string path_name;
@@ -260,6 +281,7 @@ void verifyChecksum(tcp::socket& socket, std::shared_ptr<Directory>& root, std::
 	input_request_stream >> path_name;
 	input_request_stream >> checksum;
 
+	std::cout << "Verify: " << path_name << std::endl;
 	std::shared_ptr<DirectoryElement> de = root->searchDirEl(path_name);
 
 	boost::asio::streambuf output_request;
@@ -269,49 +291,54 @@ void verifyChecksum(tcp::socket& socket, std::shared_ptr<Directory>& root, std::
 		output_request_stream << MISSING_ELEMENT << "\n\n";
 	}
 	else {
-		de->setCheckNotRemovedFlag(true); // flaggo l'elemento appena verificato, significa che esiste ancora lato client
 		if (de->getChecksum() != checksum) {
 			output_request_stream << NOT_OK << "\n\n";
+			de->setCheckNotRemovedFlag(true); // flaggo l'elemento appena verificato, significa che esiste ancora lato client
 		}
 		else {
 			output_request_stream << OK << "\n\n";
+			setNotRemovedFlagsRecursive(de, true);
 		}
 	}
 
 	boost::asio::write(socket, output_request);
 }
 
-void setNotRemovedFlagsFalse(std::shared_ptr<Directory>& dir)
-{
-	dir->setCheckNotRemovedFlag(false);
-	auto dir_children = dir->getChildren(); // boh
-	for (auto it = dir_children.begin(); it != dir_children.end(); ++it) {
-		if (it->second->type() == 0) { // e' dir
-			std::shared_ptr<Directory> sdir = std::dynamic_pointer_cast<Directory>(it->second);
-			setNotRemovedFlagsFalse(sdir);
-		}
-		else { // e' file
-			it->second->setCheckNotRemovedFlag(false);
-		}
-	}
-}
-
-void removeNotFlaggedElements(std::shared_ptr<Directory>& root, std::shared_ptr<Directory>& dir)
+void removeNotFlaggedElements(std::shared_ptr<Directory>& root, const std::string& username, std::shared_ptr<Directory>& dir)
 {
 	if (dir->getCheckNotRemovedFlag() == false) {
-		root->remove(dir->getPath().substr(dir->getPath().find_first_of("/"), dir->getPath().length())); // rimuove la root dal path
+		std::string path = dir->getName();
+		if (dir->getPath().find_first_of("/") != std::string::npos) {
+			path = dir->getPath().substr(dir->getPath().find_first_of("/") + 1, dir->getPath().length());
+		}
+
+		std::cout << dir->getPath() << std::endl;
+		root->remove(path); // rimuove la root dal path
+		std::cout << "eliminato: " << path << std::endl;
+		boost::filesystem::path p(username + "/" + root->getName() + "/" + path);
+		if (boost::filesystem::exists(p))
+			boost::filesystem::remove_all(p);
 	}
 	else {
 		auto dir_children = dir->getChildren(); // boh
 		for (auto it = dir_children.begin(); it != dir_children.end(); ++it) {
 			if (it->second->type() == 0) { // e' dir
 				std::shared_ptr<Directory> sdir = std::dynamic_pointer_cast<Directory>(it->second);
-				removeNotFlaggedElements(root, sdir);
+				removeNotFlaggedElements(root, username, sdir);
 			}
 			else { // e' file
 				if (it->second->getCheckNotRemovedFlag() == false) {
-					root->remove(it->second->getPath().substr(it->second->getPath().find_first_of("/"), it->second->getPath().length())); // rimuove la root dal path
+					std::string path = it->second->getName();
+					if (it->second->getPath().find_first_of("/") != std::string::npos) {
+						path = it->second->getPath().substr(it->second->getPath().find_first_of("/") + 1, it->second->getPath().length());
+					}
 
+					std::cout << path << std::endl;
+					root->remove(path); // rimuove la root dal path
+					std::cout << "eliminato: " << path << std::endl;
+					boost::filesystem::path p(username + "/" + root->getName() + "/" + path);
+					if(boost::filesystem::exists(p))
+						boost::filesystem::remove(p);
 				}
 			}
 		}
@@ -323,7 +350,9 @@ void mkDir(tcp::socket& socket, std::shared_ptr<Directory>& root, const std::str
 	std::string path_name;
 	input_request_stream >> path_name;
 
-	boost::filesystem::path p(username + "/" + path_name);
+	std::cout << "mk dir: " << path_name << std::endl;
+
+	boost::filesystem::path p(username + "/" + root->getName() + "/" + path_name);
 	boost::filesystem::create_directory(p);
 
 	std::shared_ptr<Directory> ptr = root->addDirectory(path_name);
@@ -337,10 +366,12 @@ void rmvEl(tcp::socket& socket, std::shared_ptr<Directory>& root, const std::str
 	std::string path_name;
 	input_request_stream >> path_name;
 
-	boost::filesystem::path p(username + "/" + path_name);
+	std::cout << "remove el: " << path_name << std::endl;
+
+	boost::filesystem::path p(username + "/" + root->getName() + "/" + path_name);
 	
 	if (boost::filesystem::exists(p)) {
-		boost::filesystem::remove(p);
+		boost::filesystem::remove_all(p);
 
 		if (!root->remove(path_name)) {
 			out("ECCEZIONE: percorso sbagliato o file inesistente");
@@ -358,10 +389,13 @@ void rnmEl(tcp::socket& socket, std::shared_ptr<Directory>& root, const std::str
 	input_request_stream >> path_old_name;
 	input_request_stream >> path_new_name;
 
-	boost::filesystem::path p(username + "/" + path_old_name);
+	std::cout << "rename el: " << path_old_name << " - " << path_new_name << std::endl;
 
-	if (boost::filesystem::exists(p)) {
-		boost::filesystem::rename(path_old_name, path_new_name);
+	boost::filesystem::path p_old(username + "/" + root->getName() + "/" + path_old_name);
+	boost::filesystem::path p_new(username + "/" + root->getName() + "/" + path_new_name);
+
+	if (boost::filesystem::exists(p_old)) {
+		boost::filesystem::rename(p_old, p_new);
 
 		if (!root->rename(path_old_name, path_new_name)) {
 			out("ECCEZIONE: percorso sbagliato o file inesistente");
@@ -389,8 +423,13 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 
 	std::cout << file_path << " size is " << file_size << ", last edited: " << last_edit << std::endl;
 
+	// Invio ACK
+	boost::asio::streambuf request_out;
+	std::ostream request_stream_out(&request_out);
+	request_stream_out << OK << "\n\n";
+	boost::asio::write(socket, request_out); // gestire errori
+
 	std::ofstream output_file(username + "/" + root->getName() + "/" + file_path.c_str(), std::ios_base::binary);
-	
 	if (!output_file) {
 		std::cout << "ECCEZIONE: failed to open " << file_path << std::endl;
 	}
@@ -441,15 +480,28 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 			if (!ptr) {
 				out("ECCEZIONAZZA: per quale motivo il file non è stato creato?");
 			}
-			boost::filesystem::path p(username + "/" + root->getName() + "/" + file_path.c_str());
-			boost::filesystem::last_write_time(p, last_edit);
-
+			
 			//chiusura file
 			std::cout << "received " << output_file.tellp() << " bytes.\n";
 			output_file.close();
+
+			std::cout << "last edit: " << last_edit << std::endl;
+			boost::filesystem::path p(username + "/" + root->getName() + "/" + file_path.c_str());
+			std::cout << "last edit file: " << boost::filesystem::last_write_time(p) << std::endl;
+			boost::filesystem::last_write_time(p, last_edit);
+			std::cout << "last edit file now: " << boost::filesystem::last_write_time(p) << std::endl;
 			break;
 		}
 	}
+}
+
+void ACK(tcp::socket& socket)
+{
+	// Invio ACK
+	boost::asio::streambuf request_out;
+	std::ostream request_stream_out(&request_out);
+	request_stream_out << OK << "\n\n";
+	boost::asio::write(socket, request_out); // gestire errori
 }
 
 void clientHandler(tcp::socket& socket)
@@ -490,28 +542,33 @@ void clientHandler(tcp::socket& socket)
 
 				case START_SYNC:
 					out("sync started");
-					setNotRemovedFlagsFalse(root);
+					setNotRemovedFlagsRecursive(root, false); // resetta i flag a potenzialmente eliminati
+					ACK(socket);
 					break;
 
 				case END_SYNC:
 					out("sync ended");
-					removeNotFlaggedElements(root, root); // elimina tutti gli elementi non flaggati
+					removeNotFlaggedElements(root, user, root); // elimina tutti gli elementi non flaggati
+					root->ls(0);
 					break;
 
 				case MK_DIR:
 					mkDir(socket, root, user, request_stream);
+					ACK(socket);
 					root->calculateChecksum();
 					root->ls(0);
 					break;
 
 				case RMV_ELEMENT:
 					rmvEl(socket, root, user, request_stream);
+					ACK(socket);
 					root->calculateChecksum();
 					root->ls(0);
 					break;
 
 				case RNM_ELEMENT:
 					rnmEl(socket, root, user, request_stream);
+					ACK(socket);
 					root->calculateChecksum();
 					root->ls(0);
 					break;
@@ -532,6 +589,9 @@ void clientHandler(tcp::socket& socket)
 			}
 
 			request_stream.read(buf.c_array(), 2); // eat the "\n\n"
+
+
+			
 		}
 	}
 }
@@ -544,11 +604,11 @@ int main()
 	root->ls(0);
 	return 5;*/
 
-	boost::filesystem::path p("montie/root/a/2.txt");
+	/*boost::filesystem::path p("montie/root/a/2.txt");
 	std::cout << boost::filesystem::last_write_time(p) << std::endl;
 	boost::filesystem::last_write_time(p, 1598022125);
 	std::cout << boost::filesystem::last_write_time(p) << std::endl;
-	return 0;
+	return 0;*/
 
 	// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 

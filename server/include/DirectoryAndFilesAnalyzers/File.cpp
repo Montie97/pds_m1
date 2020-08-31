@@ -6,12 +6,14 @@ uintmax_t File::getSize() const
 	return this->size;
 }
 
-std::shared_ptr<File> File::makeFile(const std::string& name, uintmax_t size, time_t last_edit)
+std::shared_ptr<File> File::makeFile(const std::string& name, uintmax_t size, time_t last_edit, std::weak_ptr <DirectoryElement> parent)
 {
 	std::shared_ptr<File> f = std::shared_ptr<File>(new File());
 	f->name = name;
 	f->size = size;
 	f->last_edit = last_edit;
+	f->parent = parent;
+	f->self = f;
 	f->check_not_removed_flag = true;
 	return f;
 }
@@ -63,10 +65,13 @@ void File::calculateChecksum()
 std::string File::getPathRec(std::shared_ptr<DirectoryElement> de)
 {
 	std::string path = "";
-	if (de->getParent().lock() != nullptr)
+	if (de->getParent().lock() != nullptr) {
 		path = getPathRec(de->getParent().lock());
-	path += "/";
-	path += de->getName();
+		path += "/";
+		path += de->getName();
+	}
+	else
+		path = '.';
 	return path;
 }
 
@@ -80,4 +85,8 @@ std::string File::getPath() const
 
 time_t File::getLastEdit() {
 	return this->last_edit;
+}
+
+bool File::isRoot() {
+	return false;
 }

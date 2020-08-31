@@ -50,7 +50,7 @@ std::shared_ptr<File> Directory::addFile(std::string name, uintmax_t size, time_
 	if (search != dir->children.end())
 		return std::shared_ptr<File>(nullptr);
 	else {
-		std::shared_ptr<File> f = File::makeFile(name, size, last_edit);
+		std::shared_ptr<File> f = File::makeFile(name, size, last_edit, std::weak_ptr<Directory>(dir));
 		dir->children.insert({ name, f });
 		return f;
 	}
@@ -225,11 +225,13 @@ void Directory::setSelf(std::weak_ptr<Directory> self) {
 std::string Directory::getPathRec(std::shared_ptr<DirectoryElement> de)
 {
 	std::string path = "";
-	if (de->getName() != "root") {
+	if (!de->isRoot()) {
 		path = getPathRec(de->getParent().lock());
 		path += "/";
+		path += de->getName();
 	}
-	path += de->getName();
+	else
+		path = '.';
 	return path;
 }
 
@@ -239,4 +241,12 @@ std::string Directory::getPath() const
 	std::shared_ptr<DirectoryElement> de = this->self.lock();
 	path = getPathRec(de);
 	return path;
+}
+
+bool Directory::isRoot() {
+	return this->is_root;
+}
+
+void Directory::setIsRoot(bool is_root) {
+	this->is_root = is_root;
 }
