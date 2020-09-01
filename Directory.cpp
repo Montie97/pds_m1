@@ -127,7 +127,7 @@ void Directory::ls(int indent) const
 {
 	for (int i = 0; i < indent; i++)
 		std::cout << " ";
-	std::cout << "[+] " << this->name << " {" << this->checksum << "}";
+	std::cout << "[+] " << this->name << " {checksum: " << this->checksum << "}";
 	if (this->parent.lock() != nullptr)
 		std::cout << " (parent: " << this->parent.lock()->getName() << ")";
 	std::cout << " [path: " << this->getPath() << "]" << std::endl;
