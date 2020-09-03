@@ -9,6 +9,7 @@
 
 #ifdef MULTITHREADING
 #include <thread>
+#include <future>
 #endif
 
 using boost::asio::ip::tcp;
@@ -169,12 +170,12 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string direc
 	try {
 		if (!source_file.is_open())
 			throw OPEN_FILE_ERR;
-
 		//Lettura delle informazioni sul file
 		std::string file_path = file->getPath();
 		std::time_t last_edit = file->getLastEdit();
 		size_t file_size = source_file.tellg();
 		source_file.seekg(0);
+
 		//Si avvisa il server che sta cominciando la serie di operazioni di invio di un file
 		boost::asio::streambuf request;
 		std::ostream request_stream(&request);
@@ -185,14 +186,17 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string direc
 			std::cout << error.message() << std::endl;
 			throw BOOST_ERR;
 		}
+
 		//Attesa dell'ACK
 		if (receiveCodeFromServer(socket) != OK)
 			throw START_SEND_FILE_ERR;
+
 		//Se il file non è terminato e se non è vuoto => ne leggo un chunk e lo invio al server
 		while (source_file.eof() == false && file_size != 0) {
 			source_file.read(buf.c_array(), (std::streamsize)buf.size());
 			if (source_file.gcount() <= 0)
 				throw READ_FILE_ERR;
+
 			//Avviso il server che sto per inviargli un chunk di file
 			request_stream << SENDING_FILE << "\n\n";
 			boost::asio::write(socket, request, error);
@@ -200,6 +204,7 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string direc
 				std::cout << error.message() << std::endl;
 				throw BOOST_ERR;
 			}
+
 			//Aspetto l'OK del server (serve separare l'invio di SENDING_FILE dall'invio del contenuto)
 			if (receiveCodeFromServer(socket) == OK) {
 				//Invio un chunk del file
@@ -392,10 +397,10 @@ void compareOldNewDir(std::shared_ptr<Directory> old_dir, std::shared_ptr<Direct
 				}
 			}
 
-			for (int i = 0; i < removedOrRenamed.size(); i++) {
+			for (size_t i = 0; i < removedOrRenamed.size(); i++) {
 				removedElement(removedOrRenamed[i], socket);
 			}
-			for (int i = 0; i < addedOrRenamed.size(); i++) {
+			for (size_t i = 0; i < addedOrRenamed.size(); i++) {
 				addedElement(addedOrRenamed[i], socket, directory_path);
 			}
 		}
@@ -483,7 +488,6 @@ void synchronizeElWithServer(std::shared_ptr<DirectoryElement> el, tcp::socket& 
 
 void synchronizeWithServer(tcp::socket& socket, std::shared_ptr<Directory> image_root, std::string directory_path)
 {
-	int com_code;
 	//Invio il communication code al server
 	boost::asio::streambuf request_out;
 	std::ostream request_stream_out(&request_out);
@@ -517,6 +521,33 @@ void synchronizeWithServer(tcp::socket& socket, std::shared_ptr<Directory> image
 	}
 }
 
+void connectAndAuthenticate(tcp::socket& socket, const std::string& server_ip_port, const std::string& username, const std::string& hashed_psw, const std::string& root_name, tcp::resolver::iterator& endpoint_iterator, tcp::resolver::iterator& end)
+{
+	boost::system::error_code error = boost::asio::error::host_not_found;
+	while (error && endpoint_iterator != end)
+	{
+		socket.close();
+		socket.connect(*endpoint_iterator++, error);
+	}
+	try {
+		if (error) {
+			std::cout << error.message() << std::endl;
+			throw CONNECTION_ERR;
+		}
+		std::cout << "Connected to " << server_ip_port << std::endl;
+		//Invio di name, hashed_psw e root_name al server (autenticazione)
+		std::cout << "Authenticating..." << std::endl;
+		if (sendAuthenticationData(username, hashed_psw, root_name, socket) == NOT_OK)
+			throw AUTH_ERR;
+		else
+			std::cout << "Authentication completed" << std::endl;
+	}
+	catch (int err) {
+		errorMessage(err, "");
+		throw false;
+	}
+}
+
 int main()
 {
 	//Lettura del file di configurazione
@@ -543,75 +574,59 @@ int main()
 		errorMessage(err, "");
 		return -1;
 	}
+
 	//Hash della password
 	SHA1* psw_sha1 = new SHA1();
 	psw_sha1->addBytes(psw.c_str(), strlen(psw.c_str()));
 	std::string hashed_psw = psw_sha1->getDigestToHexString();
-	//Costruzione dell'immagine
-	boost::filesystem::path p(directory_path);
-	std::shared_ptr<Directory> image_root = build_dir_wrap(p, root_name); //root dell'immagine del client
-	if (image_root == nullptr)
-		return -1; //Si è verificata un'eccezione in build_dir_wrap
-	//Connessione al server
-	size_t pos = server_ip_port.find(':');
-	if (pos == std::string::npos)
-		throw IP_PORT_ERR;
-	std::string server_port = server_ip_port.substr(pos + 1);
-	std::string server_ip = server_ip_port.substr(0, pos);
-	boost::asio::io_service io_service;
-	tcp::resolver resolver(io_service);
-	tcp::resolver::query query(server_ip, server_port);
-	tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
-	tcp::resolver::iterator end;
-	tcp::socket socket(io_service);
-	boost::system::error_code error = boost::asio::error::host_not_found;
-	while (error && endpoint_iterator != end)
-	{
-		socket.close();
-		socket.connect(*endpoint_iterator++, error);
-	}
-	try {
-		if (error) {
-			std::cout << error.message() << std::endl;
-			throw CONNECTION_ERR;
-		}
-		std::cout << "Connected to " << server_ip_port << std::endl;
-		//Invio di name, hashed_psw e root_name al server (autenticazione)
-		std::cout << "Authenticating..." << std::endl;
-		if (sendAuthenticationData(name, hashed_psw, root_name, socket) == NOT_OK)
-			throw AUTH_ERR;
-		else
-			std::cout << "Authentication completed" << std::endl;
-	}
-	catch (int err) {
-		errorMessage(err, "");
-		return -1;
-	}
-	//Sincronizzazione dell'immagine con il server
-	try {
+
+	try{
+		//Connessione al server e autenticazione (fatte da un altro thread mentre quello principale costruisce l'immagine)
+		size_t pos = server_ip_port.find(':');
+		if (pos == std::string::npos)
+			throw IP_PORT_ERR;
+		std::string server_port = server_ip_port.substr(pos + 1);
+		std::string server_ip = server_ip_port.substr(0, pos);
+		boost::asio::io_service io_service;
+		tcp::resolver resolver(io_service);
+		tcp::resolver::query query(server_ip, server_port);
+		tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
+		tcp::resolver::iterator end;
+		tcp::socket socket(io_service);
+#ifdef MULTITHREADING
+		std::thread t(connectAndAuthenticate, socket, server_ip_port, name, hashed_psw, root_name, endpoint_iterator, end); //Questa cosa non compila
+#else
+		connectAndAuthenticate(socket, server_ip_port, name, hashed_psw, root_name, endpoint_iterator, end);
+#endif
+
+		//Costruzione dell'immagine
+		boost::filesystem::path p(directory_path);
+		std::shared_ptr<Directory> image_root = build_dir_wrap(p, root_name); //root dell'immagine del client
+		if (image_root == nullptr)
+			return -1; //Si è verificata un'eccezione in build_dir_wrap
+#ifdef MULTITHREADING
+		t.join();
+#endif
+
+		//Sincronizzazione dell'immagine con il server
 		synchronizeWithServer(socket, image_root, directory_path);
+		//Loop di controllo
+		while (true) {
+			//image_root->ls(4);
+			std::chrono::milliseconds timespan(10000);
+			std::this_thread::sleep_for(timespan);
+			std::shared_ptr<Directory> current_root = build_dir_wrap(p, root_name); //root della directory corrente
+			if (current_root == nullptr)
+				return -1; //Si è verificata un'eccezione in build_dir_wrap
+			std::cout << "Checking..." << std::endl;
+			compareOldNewDir(image_root, current_root, socket, directory_path);
+			image_root.reset();
+			image_root = std::move(current_root); //Aggiornamento dell'immagine
+		}
+		socket.close();
 	}
 	catch (bool e) {
 		return -1;
 	}
-	//Loop di controllo (deve essere possibile chiuderlo)
-	while (true) {
-		//image_root->ls(4);
-		std::chrono::milliseconds timespan(10000);
-		std::this_thread::sleep_for(timespan);
-		std::shared_ptr<Directory> current_root = build_dir_wrap(p, root_name); //root della directory corrente
-		if (current_root == nullptr)
-			return -1; //Si è verificata un'eccezione in build_dir_wrap
-		std::cout << "Checking..." << std::endl;
-		try {
-			compareOldNewDir(image_root, current_root, socket, directory_path);
-		}
-		catch (bool e) {
-			return -1;
-		}
-		image_root.reset();
-		image_root = std::move(current_root); //Aggiornamento dell'immagine
-	}
-	socket.close();
 	return 0;
 }
