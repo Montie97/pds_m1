@@ -88,7 +88,7 @@ std::shared_ptr<DirectoryElement> Directory::searchDirEl(const std::string& _pat
 		token = path.substr(0, pos);
 
 		if (token == "..") {
-			curr_dir = std::dynamic_pointer_cast<Directory>(curr_dir->parent.lock()); // DA CAMBIARE QUANDO IL PARENT TORNERA Directory
+			curr_dir = std::dynamic_pointer_cast<Directory>(curr_dir->parent.lock());
 		}
 		else if (token == ".") {
 			curr_dir = curr_dir->self.lock();
@@ -100,8 +100,6 @@ std::shared_ptr<DirectoryElement> Directory::searchDirEl(const std::string& _pat
 				}
 
 				curr_dir = std::dynamic_pointer_cast<Directory>(curr_dir->children[token]);
-				/*if (!curr_dir)
-					std::cout << "ECCEZIONE, TROVATO FILE DI MEZZO" << std::endl;*/
 			}
 			else {
 				return std::shared_ptr<Directory>(nullptr);
