@@ -264,6 +264,7 @@ void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, s
 					output_request_stream << OK << "\n\n";
 				}
 				root = build_dir_wrap(p, root_name);
+				root->ls(4);
 			}
 			else {
 				output_request_stream << NOT_OK << "\n\n"; // era WRONG_PASSWORD
@@ -273,7 +274,6 @@ void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, s
 			if (error) {
 				throw error;
 			}
-			root->ls(4);
 		}
 	}
 	catch (std::exception & e) {
@@ -674,7 +674,8 @@ int main()
 
 	std::ifstream config_file("config.txt");
 	if (!config_file.is_open()) {
-		std::cerr << "failed to open file" << std::endl;
+		std::cerr << "failed to open config file" << std::endl;
+		std::system("pause");
 		return -1;
 	}
 
@@ -697,8 +698,7 @@ int main()
 			acceptor.accept(socket, error);
 
 			if (error) {
-				std::cout << error << std::endl;
-				break; // comportamento da modificare
+				throw error;
 			}
 			else {
 				std::cout << "Got client connection." << std::endl;
@@ -707,9 +707,13 @@ int main()
 		}
 	}
 	catch (std::exception & e) {
-		std::cerr << e.what() << std::endl;
+		std::cout << "exception main: " << e.what() << std::endl;
+	}
+	catch (boost::system::error_code& error) {
+		std::cout << "exception (error) main: " << error.message() << std::endl;
 	}
 
 	pool.join();
+	std::system("pause");
 	return 0;
 }
