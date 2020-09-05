@@ -7,8 +7,8 @@
 #include <string>
 #include <boost/filesystem.hpp>
 #include <mutex>
-#include "DirectoryAndFilesAnalyzers/Directory.h"
-#include "sha1/sha1.h"
+#include "Directory.h"
+#include "sha1.h"
 using namespace boost::asio::ip;
 
 std::mutex m_db_file;

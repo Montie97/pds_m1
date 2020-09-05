@@ -2,14 +2,14 @@
 #include <map>
 #include <memory>
 #include <iostream>
-#include "sha1/sha1.h"
+#include "sha1.h"
 
 class DirectoryElement
 {
 protected:
 	std::string name;
 	std::string checksum = "";
-	std::weak_ptr<DirectoryElement> parent; // METTERE DIRECTORY PRIMA O POI
+	std::weak_ptr<DirectoryElement> parent;
 	bool check_not_removed_flag;
 
 public:
