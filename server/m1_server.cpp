@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -14,13 +13,9 @@ using namespace boost::asio::ip;
 
 std::mutex m_db_file;
 unsigned short tcp_port = 1234;
-enum CommunicationCodes { START_COMMUNICATION, END_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, START_SYNC, END_SYNC, VERSION_MISMATCH };
+#define PROTOCOL_VERSION 5
+enum CommunicationCodes { START_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, START_SYNC, END_SYNC, VERSION_MISMATCH };
 
-
-void out(const std::string& str)
-{
-	std::cout << str << std::endl;
-}
 
 void build_dir(std::shared_ptr<Directory> dir, boost::filesystem::path p)
 {
@@ -178,81 +173,115 @@ void synchronizeElWithServer(std::shared_ptr<DirectoryElement> el, tcp::socket& 
 */
 
 
+void ACK(tcp::socket& socket)
+{
+	// Invio ACK
+	boost::asio::streambuf request_out;
+	std::ostream request_stream_out(&request_out);
+	request_stream_out << OK << "\n\n";
+	boost::asio::write(socket, request_out); // gestire errori
+}
+
 void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, std::string& username, std::istream& input_request_stream)
 {
-	std::string hash_psw;
-	std::string root_name;
-	input_request_stream >> username;
-	input_request_stream >> hash_psw;
-	input_request_stream >> root_name;
+	try {
+		boost::system::error_code error;
+		std::string hash_psw;
+		std::string root_name;
+		int p_vers;
+		input_request_stream >> p_vers;
 
-	std::cout << username << " " << hash_psw << " " << root_name << std::endl;
-
-	m_db_file.lock();
-	std::ifstream db_file("database.txt");
-	if (!db_file.is_open()) {
-		std::cerr << "failed to open database file" << std::endl;
-		return; // TO DO: GESTIRE ERRORE APERTURA FILE NETWORK
-	}
-
-	// Procedura di autenticazione - ricerca di utente in database
-	std::string db_curr_username;
-	std::string db_curr_hash_psw;
-	bool logged = false;
-	bool user_found = false;
-	while (!db_file.eof()) {
-		db_file >> db_curr_username;
-		db_file >> db_curr_hash_psw;
-
-		if (db_curr_username == username) {
-			user_found = true;
-			if (db_curr_hash_psw == hash_psw) {
-				logged = true;
-			}
-			else {
-				break;
-			}
-		}
-	}
-	db_file.close();
-
-	if (!user_found) { // Utente non trovato - si procede con la registrazione
-		std::ofstream db_file_out("database.txt", std::ios_base::binary | std::ios_base::app);
-		if (!db_file_out) {
-			std::cerr << "failed to open database file output" << std::endl;
-		}
-
-		db_file_out << username << " " << hash_psw << "\n";
-		db_file_out.close();
-		logged = true;
-	}
-	m_db_file.unlock();
-
-	boost::filesystem::path p(username+"/"+root_name);  // es: alessandro/musica (l'utente "alessandro" salva in remoto la sua cartella locale "musica")
-
-	boost::asio::streambuf output_request;
-	std::ostream output_request_stream(&output_request);
-
-	if (logged) {
-		boost::filesystem::path user_dir(username);
-		if (!boost::filesystem::exists(user_dir))
-			boost::filesystem::create_directory(user_dir);
-
-		if (!boost::filesystem::exists(p)) {
-			boost::filesystem::create_directory(p);
-			output_request_stream << OK << "\n\n"; // era NOT_OK
+		if (p_vers != PROTOCOL_VERSION) {
+			boost::asio::streambuf output_request;
+			std::ostream output_request_stream(&output_request);
+			std::cout << "Client connected with version: " << p_vers << ". Version required: " << PROTOCOL_VERSION << std::endl;
+			output_request_stream << VERSION_MISMATCH << "\n\n";
+			boost::asio::write(socket, output_request, error);
 		}
 		else {
-			output_request_stream << OK << "\n\n";
-		}
-		root = build_dir_wrap(p, root_name);
-	}
-	else {
-		output_request_stream << NOT_OK << "\n\n"; // era WRONG_PASSWORD
-	}
+			input_request_stream >> username;
+			input_request_stream >> hash_psw;
+			input_request_stream >> root_name;
+			std::replace(root_name.begin(), root_name.end(), '?', ' ');
 
-	boost::asio::write(socket, output_request);
-	root->ls(4);
+
+			std::cout << username << " " << hash_psw << " " << root_name << std::endl;
+
+			m_db_file.lock();
+			std::ifstream db_file("database.txt");
+			if (!db_file.is_open()) {
+				throw std::exception("start com - failed to open database file input");
+			}
+
+			// Procedura di autenticazione - ricerca di utente in database
+			std::string db_curr_username;
+			std::string db_curr_hash_psw;
+			bool logged = false;
+			bool user_found = false;
+			while (!db_file.eof()) {
+				db_file >> db_curr_username;
+				db_file >> db_curr_hash_psw;
+
+				if (db_curr_username == username) {
+					user_found = true;
+					if (db_curr_hash_psw == hash_psw) {
+						logged = true;
+					}
+					else {
+						break;
+					}
+				}
+			}
+			db_file.close();
+
+			if (!user_found) { // Utente non trovato - si procede con la registrazione
+				std::ofstream db_file_out("database.txt", std::ios_base::binary | std::ios_base::app);
+				if (!db_file_out) {
+					throw std::exception("start com - failed to open database file output");
+				}
+
+				db_file_out << username << " " << hash_psw << "\n";
+				db_file_out.close();
+				logged = true;
+			}
+			m_db_file.unlock();
+
+			boost::filesystem::path p(username + "/" + root_name);  // es: alessandro/musica (l'utente "alessandro" salva in remoto la sua cartella locale "musica")
+
+			boost::asio::streambuf output_request;
+			std::ostream output_request_stream(&output_request);
+
+			if (logged) {
+				boost::filesystem::path user_dir(username);
+				if (!boost::filesystem::exists(user_dir))
+					boost::filesystem::create_directory(user_dir);
+
+				if (!boost::filesystem::exists(p)) {
+					boost::filesystem::create_directory(p);
+					output_request_stream << OK << "\n\n"; // era NOT_OK
+				}
+				else {
+					output_request_stream << OK << "\n\n";
+				}
+				root = build_dir_wrap(p, root_name);
+				root->ls(4);
+			}
+			else {
+				output_request_stream << NOT_OK << "\n\n"; // era WRONG_PASSWORD
+			}
+
+			boost::asio::write(socket, output_request, error);
+			if (error) {
+				throw error;
+			}
+		}
+	}
+	catch (std::exception & e) {
+		throw e;
+	}
+	catch (boost::system::error_code & error) {
+		throw error;
+	}
 }
 
 void setNotRemovedFlagsRecursive(std::shared_ptr<DirectoryElement> el, bool b)
@@ -270,15 +299,15 @@ void setNotRemovedFlagsRecursive(std::shared_ptr<DirectoryElement> el, bool b)
 			}
 		}
 	}
-
-	// TODO: INVIA OK
 }
 
 void verifyChecksum(tcp::socket& socket, std::shared_ptr<Directory>& root, std::istream& input_request_stream)
 {
+	boost::system::error_code error;
 	std::string path_name;
 	std::string checksum;
 	input_request_stream >> path_name;
+	std::replace(path_name.begin(), path_name.end(), '?', ' ');
 	input_request_stream >> checksum;
 
 	std::cout << "Verify: " << path_name << std::endl;
@@ -301,7 +330,10 @@ void verifyChecksum(tcp::socket& socket, std::shared_ptr<Directory>& root, std::
 		}
 	}
 
-	boost::asio::write(socket, output_request);
+	boost::asio::write(socket, output_request, error);
+	if (error) {
+		throw error;
+	}
 }
 
 void removeNotFlaggedElements(std::shared_ptr<Directory>& root, const std::string& username, std::shared_ptr<Directory>& dir)
@@ -349,6 +381,7 @@ void mkDir(tcp::socket& socket, std::shared_ptr<Directory>& root, const std::str
 {
 	std::string path_name;
 	input_request_stream >> path_name;
+	std::replace(path_name.begin(), path_name.end(), '?', ' ');
 
 	std::cout << "mk dir: " << path_name << std::endl;
 
@@ -357,7 +390,7 @@ void mkDir(tcp::socket& socket, std::shared_ptr<Directory>& root, const std::str
 
 	std::shared_ptr<Directory> ptr = root->addDirectory(path_name);
 	if (!ptr) {
-		out("ECCEZIONAZZA: per quale motivo la dir non è stata creata?");
+		throw std::exception("mkdir - errore in creazione dir");
 	}
 }
 
@@ -365,6 +398,7 @@ void rmvEl(tcp::socket& socket, std::shared_ptr<Directory>& root, const std::str
 {
 	std::string path_name;
 	input_request_stream >> path_name;
+	std::replace(path_name.begin(), path_name.end(), '?', ' ');
 
 	std::cout << "remove el: " << path_name << std::endl;
 
@@ -374,11 +408,11 @@ void rmvEl(tcp::socket& socket, std::shared_ptr<Directory>& root, const std::str
 		boost::filesystem::remove_all(p);
 
 		if (!root->remove(path_name)) {
-			out("ECCEZIONE: percorso sbagliato o file inesistente");
+			throw std::exception("rmv - percorso sbagliato o file inesistente");
 		}
 	}
 	else {
-		out("File inesistente");
+		throw std::exception("rmv - file inesistente");
 	}
 }
 
@@ -387,7 +421,9 @@ void rnmEl(tcp::socket& socket, std::shared_ptr<Directory>& root, const std::str
 	std::string path_old_name;
 	std::string path_new_name;
 	input_request_stream >> path_old_name;
+	std::replace(path_old_name.begin(), path_old_name.end(), '?', ' ');
 	input_request_stream >> path_new_name;
+	std::replace(path_new_name.begin(), path_new_name.end(), '?', ' ');
 
 	std::cout << "rename el: " << path_old_name << " - " << path_new_name << std::endl;
 
@@ -398,52 +434,32 @@ void rnmEl(tcp::socket& socket, std::shared_ptr<Directory>& root, const std::str
 		boost::filesystem::rename(p_old, p_new);
 
 		if (!root->rename(path_old_name, path_new_name)) {
-			out("ECCEZIONE: percorso sbagliato o file inesistente");
+			throw std::exception("rnm - percorso sbagliato o file inesistente");
 		}
 	}
 	else {
-		out("File inesistente");
+		throw std::exception("rnm - file inesistente");
 	}
 }
 
 void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, const std::string& username, std::istream& input_request_stream)
 {
-	// Inizializzazione variabili
-	boost::array<char, 1024> buf;
-	std::string file_path;
-	size_t file_size = -1;
-	time_t last_edit; // TODO: AGGIORNARE ROOT CON NUOVO FILE
-	boost::system::error_code error;
+	try {
+		// Inizializzazione variabili
+		boost::array<char, 1024*64> buf;
+		std::string file_path;
+		size_t file_size = -1;
+		time_t last_edit; // TODO: AGGIORNARE ROOT CON NUOVO FILE
+		boost::system::error_code error;
 
-	// ricezione path file e dimensione
-	input_request_stream >> file_path;
-	input_request_stream >> file_size;
-	input_request_stream >> last_edit;
-	input_request_stream.read(buf.c_array(), 2); // eat the "\n\n"
-
-	std::cout << file_path << " size is " << file_size << ", last edited: " << last_edit << std::endl;
-
-	// Invio ACK
-	boost::asio::streambuf request_out;
-	std::ostream request_stream_out(&request_out);
-	request_stream_out << OK << "\n\n";
-	boost::asio::write(socket, request_out); // gestire errori
-
-	std::ofstream output_file(username + "/" + root->getName() + "/" + file_path.c_str(), std::ios_base::binary);
-	if (!output_file) {
-		std::cout << "ECCEZIONE: failed to open " << file_path << std::endl;
-	}
-
-	while (true) {
-		// Inizializzazione dei buffer necessari per ricevere il messaggio di trasmissione file intermedio
-		// (SENDING_FILE o END_SEND_FILE)
-		boost::asio::streambuf request_buf;
-		boost::asio::read_until(socket, request_buf, "\n\n");
-		std::cout << "request size: " << request_buf.size() << "\n";
-		std::istream input_request_stream(&request_buf);
-		int com_code;
-		input_request_stream >> com_code;
+		// ricezione path file e dimensione
+		input_request_stream >> file_path;
+		std::replace(file_path.begin(), file_path.end(), '?', ' '); // gli spazi mi arrivano come punti interrogativi
+		input_request_stream >> file_size;
+		input_request_stream >> last_edit;
 		input_request_stream.read(buf.c_array(), 2); // eat the "\n\n"
+
+		std::cout << file_path << " size is " << file_size << ", last edited: " << last_edit << std::endl;
 
 		// Invio ACK
 		boost::asio::streambuf request_out;
@@ -451,58 +467,93 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 		request_stream_out << OK << "\n\n";
 		boost::asio::write(socket, request_out); // gestire errori
 
-		if (com_code == SENDING_FILE) {
-			// Legge bytes trasmessi e li scrive su file
-			size_t len = socket.read_some(boost::asio::buffer(buf), error);
+		std::ofstream output_file(username + "/" + root->getName() + "/" + file_path.c_str(), std::ios_base::binary);
+		if (!output_file) {
+			throw std::exception("rcv file - failed to open file");
+		}
 
-			std::cout << "Received chunk bytes: " << len << std::endl;
-			if (len > 0) {
-				output_file.write(buf.c_array(), (std::streamsize) len);
-			}
+		while (true) {
+			// Inizializzazione dei buffer necessari per ricevere il messaggio di trasmissione file intermedio
+			// (SENDING_FILE o END_SEND_FILE)
+			boost::asio::streambuf request_buf;
+			boost::asio::read_until(socket, request_buf, "\n\n", error);
 			if (error) {
-				std::cout << "error: " << error.message() << std::endl;
+				throw error;
+			}
+			std::cout << "request size: " << request_buf.size() << "\n";
+			std::istream input_request_stream(&request_buf);
+			int com_code;
+			size_t expected_chunk_size;
+			input_request_stream >> com_code;
+			input_request_stream >> expected_chunk_size;
+			input_request_stream.read(buf.c_array(), 2); // eat the "\n\n"
+			std::cout << "rcv file com code: " << com_code << std::endl;
+			std::cout << "expected chunk size: " << expected_chunk_size << std::endl;
+
+			ACK(socket);
+
+			if (com_code == SENDING_FILE) {
+				// Legge bytes trasmessi e li scrive su file
+				size_t len = boost::asio::read(socket, boost::asio::buffer(buf, expected_chunk_size), error);
+				ACK(socket);
+
+				std::cout << "Received chunk bytes: " << len << std::endl;
+				if (len > 0) {
+					output_file.write(buf.c_array(), (std::streamsize) len);
+				}
+				if (error) {
+					throw error;
+				}
+			}
+			else if (com_code == END_SEND_FILE) {
+				// A fine trasmissione, controlla la dimensione file per capire se qualcosa è cambiato durante la trasmissione
+				// in fine chiude il file
+				if (output_file.tellp() == (std::fstream::pos_type)(std::streamsize) file_size) {
+					std::cout << "file ricevuto senza problemi" << std::endl;
+				}
+				else {
+					throw std::exception("rcv file - dimensione file è cambiata durante la trasmissione, o errore trasmissione file_size");
+				}
+
+				//se il file è arrivato si aggiorna il filesystem
+				root->remove(file_path); // se c'era già, lo rimuove
+				std::shared_ptr<File> ptr = root->addFile(file_path, file_size, last_edit);
+				if (!ptr) {
+					throw std::exception("rcv file - il file non è stato creato nell'immagine");
+				}
+
+				//chiusura file
+				std::cout << "received " << output_file.tellp() << " bytes.\n";
+				output_file.close();
+
+				boost::filesystem::path p(username + "/" + root->getName() + "/" + file_path.c_str());
+				boost::filesystem::last_write_time(p, last_edit);
 				break;
 			}
 		}
-		else if (com_code == END_SEND_FILE) {
-			// A fine trasmissione, controlla la dimensione file per capire se qualcosa è cambiato durante la trasmissione
-			// in fine chiude il file
-			if (output_file.tellp() == (std::fstream::pos_type)(std::streamsize) file_size) {
-				out("file ricevuto senza problemi");
-			}
-			else {
-				out("dimensione file è cambiata durante la trasmissione, o errore trasmissione file_size");
-			}
-			
-			//se il file è arrivato si aggiorna il filesystem
-			root->remove(file_path); // se c'era già, lo rimuove
-			std::shared_ptr<File> ptr = root->addFile(file_path, file_size, last_edit);
-			if (!ptr) {
-				out("ECCEZIONAZZA: per quale motivo il file non è stato creato?");
-			}
-			
-			//chiusura file
-			std::cout << "received " << output_file.tellp() << " bytes.\n";
-			output_file.close();
-
-			std::cout << "last edit: " << last_edit << std::endl;
-			boost::filesystem::path p(username + "/" + root->getName() + "/" + file_path.c_str());
-			std::cout << "last edit file: " << boost::filesystem::last_write_time(p) << std::endl;
-			boost::filesystem::last_write_time(p, last_edit);
-			std::cout << "last edit file now: " << boost::filesystem::last_write_time(p) << std::endl;
-			break;
-		}
+	}
+	catch (std::exception& e) {
+		throw e;
+	}
+	catch (boost::system::error_code & error) {
+		throw error;
 	}
 }
 
-void ACK(tcp::socket& socket)
+void sendNotOK(tcp::socket& socket)
 {
-	// Invio ACK
-	boost::asio::streambuf request_out;
-	std::ostream request_stream_out(&request_out);
-	request_stream_out << OK << "\n\n";
-	boost::asio::write(socket, request_out); // gestire errori
+	boost::system::error_code wer;
+	do {
+		boost::asio::streambuf request_out;
+		std::ostream request_stream_out(&request_out);
+		request_stream_out << NOT_OK << "\n\n";
+		boost::asio::write(socket, request_out, wer);
+		if (wer) {
+			std::cout << "wer: " << wer.message() << std::endl;
+		}
+	} while (wer);
 }
+
 
 void clientHandler(tcp::socket& socket)
 {
@@ -512,42 +563,43 @@ void clientHandler(tcp::socket& socket)
 
 	while (!quit) {
 		boost::array<char, 1024> buf;
-		out("waiting for message");
+		std::cout << "waiting for message" << std::endl;
 
 		boost::asio::streambuf request_buf;
 		boost::system::error_code error;
 		boost::asio::read_until(socket, request_buf, "\n\n", error);
 		if (error) {
-			std::cout << "Problema di connessione: " << error.message() << ", spegnimento client" << std::endl;
+			std::cout << "shutting down client. Reason: " << error.message() << std::endl;
 			quit = true;
 		}
 		else {
-			std::cout << "request size: " << request_buf.size() << "\n";
-			std::istream request_stream(&request_buf);
-			int com_code;
-			request_stream >> com_code;
+			try {
+				std::cout << "request size: " << request_buf.size() << "\n";
+				std::istream request_stream(&request_buf);
+				int com_code;
+				request_stream >> com_code;
 
-			std::cout << "com_code: " << com_code << std::endl;
+				std::cout << "com_code: " << com_code << std::endl;
 
-			switch (com_code) {
+				switch (com_code) {
 				case START_COMMUNICATION:
-					out("Start communication");
+					std::cout << "start communication" << std::endl;
 					startCommunication(socket, root, user, request_stream);
 					break;
 
 				case VERIFY_CHECKSUM:
-					out("verify checksum");
+					std::cout << "verify checksum" << std::endl;
 					verifyChecksum(socket, root, request_stream);
 					break;
 
 				case START_SYNC:
-					out("sync started");
+					std::cout << "sync started" << std::endl;
 					setNotRemovedFlagsRecursive(root, false); // resetta i flag a potenzialmente eliminati
 					ACK(socket);
 					break;
 
 				case END_SYNC:
-					out("sync ended");
+					std::cout << "sync ended" << std::endl;
 					removeNotFlaggedElements(root, user, root); // elimina tutti gli elementi non flaggati
 					root->ls(0);
 					break;
@@ -579,21 +631,28 @@ void clientHandler(tcp::socket& socket)
 					root->ls(0);
 					break;
 
-				case END_COMMUNICATION:
-					quit = true;
-					break;
-
 				default:
-					out("che succede?");
+					std::cout << "Unexpected com code: " << com_code << std::endl;
 					break;
+				}
+
+				request_stream.read(buf.c_array(), 2); // eat the "\n\n"
 			}
-
-			request_stream.read(buf.c_array(), 2); // eat the "\n\n"
-
-
-			
+			catch (std::exception & e) {
+				std::cout << "exception: " << e.what() << std::endl;
+				quit = true;
+				sendNotOK(socket);
+			}
+			catch (boost::system::error_code & error) {
+				std::cout << "exception (error): " << error.message() << std::endl;
+				quit = true;
+				sendNotOK(socket);
+			}
 		}
 	}
+	
+	socket.close();
+	std::cout << "end communication with client" << std::endl;
 }
 
 int main()
@@ -615,7 +674,8 @@ int main()
 
 	std::ifstream config_file("config.txt");
 	if (!config_file.is_open()) {
-		std::cerr << "failed to open file" << std::endl;
+		std::cerr << "failed to open config file" << std::endl;
+		std::system("pause");
 		return -1;
 	}
 
@@ -638,8 +698,7 @@ int main()
 			acceptor.accept(socket, error);
 
 			if (error) {
-				std::cout << error << std::endl;
-				break; // comportamento da modificare
+				throw error;
 			}
 			else {
 				std::cout << "Got client connection." << std::endl;
@@ -648,9 +707,13 @@ int main()
 		}
 	}
 	catch (std::exception & e) {
-		std::cerr << e.what() << std::endl;
+		std::cout << "exception main: " << e.what() << std::endl;
+	}
+	catch (boost::system::error_code& error) {
+		std::cout << "exception (error) main: " << error.message() << std::endl;
 	}
 
 	pool.join();
+	std::system("pause");
 	return 0;
 }
