@@ -16,7 +16,7 @@
 
 using boost::asio::ip::tcp;
 
-enum ErrorCodes { RNM_ERR, OPEN_FILE_ERR, READ_FILE_ERR, CONF_ERR, NOT_EXISTING_DIR_ERR, ADD_DIR_ERR, ADD_FILE_ERR, CONF_FILE_ERR, IP_PORT_ERR, CONNECTION_ERR, AUTH_ERR, VERSION_ERR, TRANSIENT_ERR };
+enum ErrorCodes { OPEN_FILE_ERR, READ_FILE_ERR, CONF_ERR, NOT_EXISTING_DIR_ERR, ADD_DIR_ERR, ADD_FILE_ERR, CONF_FILE_ERR, IP_PORT_ERR, CONNECTION_ERR, AUTH_ERR, VERSION_ERR, TRANSIENT_ERR };
 enum CommunicationCodes { START_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, START_SYNC, END_SYNC, VERSION_MISMATCH };
 
 void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket, std::string directory_path); //Serve il prototipo perché c'è una ricorsione "indiretta" in sendDir" (sendDir chiama addedElement e addedElement chiama sendDir)
@@ -55,10 +55,6 @@ void errorMessage(enum ErrorCodes err, std::string details)
 
 		case AUTH_ERR:
 			std::cout << "Authentication failed" << std::endl;
-			break;
-
-		case RNM_ERR:
-			std::cout << "An error occurred during the notification regarding a renamed element (" << details << ")" << std::endl;
 			break;
 
 		case OPEN_FILE_ERR:
@@ -493,7 +489,7 @@ void connectAndAuthenticate(tcp::socket& socket, const std::string& server_ip_po
 int main()
 {
 	//Lettura del file di configurazione
-	std::ifstream conf_file("../conf.txt");
+	std::ifstream conf_file("conf.txt");
 	std::string name;
 	std::string psw;
 	std::string root_name;
@@ -559,8 +555,6 @@ int main()
 				std::chrono::milliseconds timespan(1000);
 				std::this_thread::sleep_for(timespan);
 				std::shared_ptr<Directory> current_root = build_dir_wrap(p, root_name); //root della directory corrente (lancia eccezioni)
-				if (current_root == nullptr)
-					return -1; //Si è verificata un'eccezione in build_dir_wrap
 				//std::cout << "Checking..." << std::endl;
 				compareOldNewDir(image_root, current_root, socket, directory_path); //Lancia eccezioni
 				image_root.reset();
