@@ -1,4 +1,3 @@
 # pds_m1
 
-MONTALTO Lorenzo
-MORINA Alessandro
+by MONTALTO Lorenzo & MORINA Alessandro
