@@ -3,7 +3,7 @@
 ## by MONTALTO Lorenzo & MORINA Alessandro
 
 
-## Logica protocollo
+### Logica protocollo
 
 Il funzionamento generale della procedura di sincronizzazione è suddivisa in due fasi:
 
@@ -20,3 +20,8 @@ di verifica, vengono considerati eliminati (perchè appunto non erano presenti l
 Ogni tot secondi il client esegue una scansione della cartella in locale e, attraverso la compareOldNewDir, riesce a
 dedurre le aggiunte, rimozioni, modifice e rinominazioni delle cartelle effettuare, così da mandare dei specifici
 messaggi al server in modo da aggiornare la controparte in remoto.
+
+### Risorse esterne
+
+- Libreria boost versione 1.73
+- Implementazione SHA1
