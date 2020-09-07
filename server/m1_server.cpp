@@ -12,7 +12,7 @@
 using namespace boost::asio::ip;
 
 std::mutex m_db;
-#define PROTOCOL_VERSION 5
+#define PROTOCOL_VERSION 6
 std::vector<std::string> logged_users;
 enum CommunicationCodes { START_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, START_SYNC, END_SYNC, VERSION_MISMATCH };
 
@@ -98,7 +98,14 @@ void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, s
 		boost::asio::streambuf output_request;
 		std::ostream output_request_stream(&output_request);
 		std::cout << "client connected with version: " << p_vers << " - version required: " << PROTOCOL_VERSION << std::endl;
+		
 		output_request_stream << VERSION_MISMATCH << "\n\n";
+		boost::asio::write(socket, output_request, error);
+		if (error) {
+			throw error;
+		}
+
+		output_request_stream << PROTOCOL_VERSION << "\n\n";
 		boost::asio::write(socket, output_request, error);
 		if (error) {
 			throw error;
@@ -365,6 +372,7 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 	boost::array<char, 1024 * 64> buf;
 	std::string file_path;
 	size_t file_size = -1;
+	size_t received_file_size = 0;
 	time_t last_edit; // TODO: AGGIORNARE ROOT CON NUOVO FILE
 	boost::system::error_code error;
 
@@ -413,7 +421,8 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 			size_t len = boost::asio::read(socket, boost::asio::buffer(buf, expected_chunk_size), error);
 			ACK(socket);
 
-			std::cout << "received chunk bytes: " << len << std::endl;
+			received_file_size += len;
+			std::cout << "received chunk bytes: " << len << " | progress: " << (received_file_size * 100 / file_size ) << "%" << std::endl;
 			if (len > 0) {
 				output_file.write(buf.c_array(), (std::streamsize) len);
 			}
@@ -422,8 +431,8 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 			}
 		}
 		else if (com_code == END_SEND_FILE) {
-			// A fine trasmissione, controlla la dimensione file per capire se qualcosa è cambiato durante la trasmissione
-			// in fine chiude il file
+			// A fine trasmissione, controlla la dimensione file per capire se qualcosa è cambiato durante
+			// il trasferimento, in fine chiude il file
 			if (output_file.tellp() == (std::fstream::pos_type)(std::streamsize) file_size) {
 				ACK(socket);
 				std::cout << "file ricevuto senza problemi" << std::endl;
@@ -554,11 +563,13 @@ void clientHandler(tcp::socket& socket)
 	if(user != "")
 		logged_users.erase(std::find(logged_users.begin(), logged_users.end(), user));
 	socket.close();
-	std::cout << "end communication with client" << std::endl;
+	std::cout << "end communication with client " << user << std::endl;
 }
 
 int main()
 {
+	std::cout << " # server v. " << PROTOCOL_VERSION << " # \n" << std::endl;
+
 	std::ifstream config_file("config.txt");
 	if (!config_file.is_open()) {
 		std::cerr << "failed to open config file" << std::endl;

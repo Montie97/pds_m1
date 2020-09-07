@@ -1,6 +1,27 @@
 # pds_m1
 
-## server
+## Comportamento server
+
+Il server si metterà in ascolto sulla porta specificata nel file config.txt, dopodichè gestirà la registrazione
+dei nuovi utenti nel file database.txt e/o il loro login, seguito dalle operazioni di sincronizzazione della
+cartella specificata dal client.
+Il server lavora con una thread pool, con N thread, dove N è specificato nel file config.txt.
+Ogni thread si occupa di un solo client.
+Nella cartella in cui è presente il file m1_server.exe, devono essere presenti anche il file config.txt e database.txt;
+nella quale, inoltre, verranno create le cartelle personali di ogni utente registrato.
+Dentro le cartelle personali di ogni utente, sono presenti la/le cartelle root che l'utente ha desiderato backuppare.
+Ogni utente può sincronizzare una cartella root per volta.
+
+## Contenuto file config.txt
+
+Prima riga: numero threads nella thread pool
+Seconda riga: porta sulla quale il server è in ascolto
+
+## Contenuto file database.txt
+
+Ogni riga contiene un nome utente e la password hashata separati da uno spazio
+
+## Descrizione funzioni
 
 -main:
 nel main viene posto il server in ascolto (sulla tcp_port) delle connessioni in entrata, e viene gestita una thread pool.
