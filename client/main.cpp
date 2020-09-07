@@ -12,11 +12,11 @@
 #include <future>
 #endif
 
-#define PROTOCOL_VERSION 5
+#define PROTOCOL_VERSION 6
 
 using boost::asio::ip::tcp;
 
-enum ErrorCodes { OPEN_FILE_ERR, READ_FILE_ERR, CONF_ERR, NOT_EXISTING_DIR_ERR, ADD_DIR_ERR, ADD_FILE_ERR, CONF_FILE_ERR, IP_PORT_ERR, CONNECTION_ERR, AUTH_ERR, VERSION_ERR, TRANSIENT_ERR };
+enum ErrorCodes { CONF_ERR, NOT_EXISTING_DIR_ERR, ADD_DIR_ERR, ADD_FILE_ERR, CONF_FILE_ERR, IP_PORT_ERR, AUTH_ERR, VERSION_ERR, TRANSIENT_ERR };
 enum CommunicationCodes { START_COMMUNICATION, VERIFY_CHECKSUM, OK, NOT_OK, MISSING_ELEMENT, MK_DIR, RMV_ELEMENT, RNM_ELEMENT, START_SEND_FILE, SENDING_FILE, END_SEND_FILE, START_SYNC, END_SYNC, VERSION_MISMATCH };
 
 void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket, std::string directory_path); //Serve il prototipo perché c'è una ricorsione "indiretta" in sendDir" (sendDir chiama addedElement e addedElement chiama sendDir)
@@ -49,24 +49,12 @@ void errorMessage(enum ErrorCodes err, std::string details)
 			std::cout << "Invalid format for the ip:port pair" << std::endl;
 			break;
 
-		case CONNECTION_ERR:
-			std::cout << "An error occurred while trying to connect to server" << std::endl;
-			break;
-
 		case AUTH_ERR:
 			std::cout << "Authentication failed" << std::endl;
 			break;
 
-		case OPEN_FILE_ERR:
-			std::cout << "An error occurred while trying to open a file to send (" << details << ")" << std::endl;
-			break;
-
-		case READ_FILE_ERR:
-			std::cout << "An error occurred while reding the content of a file (" << details << ")" << std::endl;
-			break;
-
 		case VERSION_ERR:
-			std::cout << "The protocol version of the client is not up to date" << std::endl;
+			std::cout << "The protocol version of the client is not up to date (client has version " << PROTOCOL_VERSION << " while server has version " << details << ")" << std::endl;
 			break;
 	}
 }
@@ -139,7 +127,7 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string direc
 	std::ifstream source_file(directory_path + '/' + file->getPath(), std::ios_base::binary | std::ios_base::ate);
 	try {
 		if (!source_file.is_open())
-			throw OPEN_FILE_ERR;
+			throw TRANSIENT_ERR;
 		//Lettura delle informazioni sul file
 		std::string file_path = file->getPath();
 		std::time_t last_edit = file->getLastEdit();
@@ -166,7 +154,7 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string direc
 				source_file.read(buf.c_array(), (std::streamsize)buf.size());
 				if (source_file.gcount() <= 0) {
 					source_file.close();
-					throw READ_FILE_ERR;
+					throw TRANSIENT_ERR;
 				}
 
 				//Avviso il server che sto per inviargli un chunk di file
@@ -186,7 +174,8 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string direc
 				}
 
 				//Aspetto che il server mi dica di aver ricevuto il chunk
-				receiveCodeFromServer(socket);
+				if (receiveCodeFromServer(socket) != OK)
+					throw TRANSIENT_ERR;
 			}
 
 			//Comunico al server che la procedura di invio del file è terminata
@@ -197,8 +186,11 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string direc
 				throw TRANSIENT_ERR;
 			}
 			//Aspetto l'ACK
-			receiveCodeFromServer(socket);
+			if (receiveCodeFromServer(socket) != OK)
+				throw TRANSIENT_ERR;
 		}
+		else
+			throw TRANSIENT_ERR;
 	}
 	catch (enum ErrorCodes err) {
 		source_file.close();
@@ -233,6 +225,8 @@ void sendDir(std::shared_ptr<Directory> dir, tcp::socket& socket, std::string di
 			addedElement(it->second, socket, directory_path); //Lancia eccezioni
 		}
 	}
+	else
+		throw TRANSIENT_ERR;
 }
 
 void sendModifiedFile(std::shared_ptr<File> file, tcp::socket& socket, std::string directory_path) {
@@ -254,7 +248,8 @@ void removedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
 		throw TRANSIENT_ERR;
 	}
 	//Aspetto l'ACK del server
-	receiveCodeFromServer(socket);
+	if (receiveCodeFromServer(socket) != OK)
+		throw TRANSIENT_ERR;
 }
 
 void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket, std::string directory_path)
@@ -285,7 +280,8 @@ void renamedElement(std::shared_ptr<DirectoryElement> de1, std::shared_ptr<Direc
 		throw TRANSIENT_ERR;
 	}
 	//Aspetto l'ACK dal server
-	receiveCodeFromServer(socket);
+	if (receiveCodeFromServer(socket) != OK)
+		throw TRANSIENT_ERR;
 }
 
 bool checkRenamed(std::shared_ptr<Directory> dir1, std::shared_ptr<Directory> dir2)
@@ -476,20 +472,22 @@ void connectAndAuthenticate(tcp::socket& socket, const std::string& server_ip_po
 	//Invio di name, hashed_psw e root_name al server (autenticazione)
 	std::cout << "Authenticating..." << std::endl;
 	switch (sendAuthenticationData(username, hashed_psw, root_name, socket)) { //Lancia eccezioni
-		case OK:
-			std::cout << "Authentication completed" << std::endl;
-			break;
-		case NOT_OK:
-			throw AUTH_ERR;
-		case VERSION_MISMATCH:
-			throw VERSION_ERR;
-	}	
+	case OK:
+		std::cout << "Authentication completed" << std::endl;
+		break;
+	case NOT_OK:
+		throw AUTH_ERR;
+	case VERSION_MISMATCH:
+		int right_version = receiveCodeFromServer(socket); //Il server mi dice quale versione del protocollo dovrei avere
+		errorMessage(VERSION_ERR, std::to_string(right_version));
+		throw false; //Questo throw viene usato per segnalare alla funzione chiamante che l'eccezione è già stata catturata
+	}
 }
 
 int main()
 {
 	//Lettura del file di configurazione
-	std::ifstream conf_file("conf.txt");
+	std::ifstream conf_file("../conf.txt");
 	std::string name;
 	std::string psw;
 	std::string root_name;
