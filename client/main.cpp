@@ -5,13 +5,6 @@
 #include <boost/asio.hpp>
 #include "Directory.h"
 
-//#define MULTITHREADING
-
-#ifdef MULTITHREADING
-#include <thread>
-#include <future>
-#endif
-
 #define PROTOCOL_VERSION 6
 
 using boost::asio::ip::tcp;
@@ -120,7 +113,7 @@ bool compareChecksum(std::shared_ptr<DirectoryElement> old_dir, std::shared_ptr<
 
 void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string directory_path)
 {
-	std::cout << "Sending file " << file->getPath() << std::endl;
+	std::cout << "Sending file " << file->getPath() << "..." << std::endl;
 	//Apertura del file
 	boost::system::error_code error;
 	boost::array<char, 65536> buf; //Buffer usato per inviare i chunk di file al server
@@ -158,7 +151,8 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string direc
 				}
 
 				//Avviso il server che sto per inviargli un chunk di file
-				request_stream << SENDING_FILE << '\n' << source_file.gcount() << "\n\n";
+				size_t chunk_size = source_file.gcount();
+				request_stream << SENDING_FILE << '\n' << chunk_size << "\n\n";
 				boost::asio::write(socket, request, error);
 				if (error) {
 					std::cout << error.message() << std::endl;
@@ -177,7 +171,6 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string direc
 				if (receiveCodeFromServer(socket) != OK)
 					throw TRANSIENT_ERR;
 			}
-
 			//Comunico al server che la procedura di invio del file è terminata
 			request_stream << END_SEND_FILE << '\n' << 0 << "\n\n";
 			boost::asio::write(socket, request, error);
@@ -202,11 +195,12 @@ void sendFile(std::shared_ptr<File> file, tcp::socket& socket, std::string direc
 			throw TRANSIENT_ERR;
 	}
 	source_file.close();
+	std::cout << file->getPath() << " sent" << std::endl;
 }
 
 void sendDir(std::shared_ptr<Directory> dir, tcp::socket& socket, std::string directory_path)
 {
-	std::cout << "Sending dir " << dir->getPath() << std::endl;
+	std::cout << "Sending dir " << dir->getPath() << "..." << std::endl;
 	boost::asio::streambuf request;
 	std::ostream request_stream(&request);
 	std::string path = dir->getPath();
@@ -227,6 +221,7 @@ void sendDir(std::shared_ptr<Directory> dir, tcp::socket& socket, std::string di
 	}
 	else
 		throw TRANSIENT_ERR;
+	std::cout << dir->getPath() << " sent" << std::endl;
 }
 
 void sendModifiedFile(std::shared_ptr<File> file, tcp::socket& socket, std::string directory_path) {
@@ -235,7 +230,7 @@ void sendModifiedFile(std::shared_ptr<File> file, tcp::socket& socket, std::stri
 
 void removedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
 {
-	std::cout << "Removing " << de->getPath() << std::endl;
+	std::cout << "Removing " << de->getPath() << "..." << std::endl;
 	boost::asio::streambuf request;
 	std::ostream request_stream(&request);
 	std::string path = de->getPath();
@@ -250,11 +245,11 @@ void removedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket)
 	//Aspetto l'ACK del server
 	if (receiveCodeFromServer(socket) != OK)
 		throw TRANSIENT_ERR;
+	std::cout << de->getPath() << " removed" << std::endl;
 }
 
 void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket, std::string directory_path)
 {
-	std::cout << "Adding " << de->getPath() << std::endl;
 	if (de->type() == 0) { // è directory
 		sendDir(std::dynamic_pointer_cast<Directory>(de), socket, directory_path); //lancia eccezioni
 	}
@@ -265,7 +260,7 @@ void addedElement(std::shared_ptr<DirectoryElement> de, tcp::socket& socket, std
 
 void renamedElement(std::shared_ptr<DirectoryElement> de1, std::shared_ptr<DirectoryElement> de2, tcp::socket& socket)
 {
-	std::cout << "Renaming " << de1->getPath() << " into " << de2->getPath() << std::endl;
+	std::cout << "Renaming " << de1->getPath() << " into " << de2->getPath() << "..." << std::endl;
 	boost::asio::streambuf request;
 	std::ostream request_stream(&request);
 	std::string path1 = de1->getPath();
@@ -282,6 +277,7 @@ void renamedElement(std::shared_ptr<DirectoryElement> de1, std::shared_ptr<Direc
 	//Aspetto l'ACK dal server
 	if (receiveCodeFromServer(socket) != OK)
 		throw TRANSIENT_ERR;
+	std::cout << de2->getPath() << " renamed" << std::endl;
 }
 
 bool checkRenamed(std::shared_ptr<Directory> dir1, std::shared_ptr<Directory> dir2)
@@ -487,7 +483,7 @@ void connectAndAuthenticate(tcp::socket& socket, const std::string& server_ip_po
 int main()
 {
 	//Lettura del file di configurazione
-	std::ifstream conf_file("../conf.txt");
+	std::ifstream conf_file("conf.txt");
 	std::string name;
 	std::string psw;
 	std::string root_name;
@@ -531,19 +527,11 @@ int main()
 			tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
 			tcp::resolver::iterator end;
 			tcp::socket socket(io_service);
-#ifdef MULTITHREADING
-			std::thread t(connectAndAuthenticate, socket, server_ip_port, name, hashed_psw, root_name, endpoint_iterator, end); //Questa cosa non compila
-#else
 			connectAndAuthenticate(socket, server_ip_port, name, hashed_psw, root_name, endpoint_iterator, end); //Lancia eccezioni
-#endif
 
 			//Costruzione dell'immagine
 			boost::filesystem::path p(directory_path);
 			std::shared_ptr<Directory> image_root = build_dir_wrap(p, root_name); //root dell'immagine del client (lancia eccezioni)
-
-#ifdef MULTITHREADING
-			t.join();
-#endif
 
 			//Sincronizzazione dell'immagine con il server
 			synchronizeWithServer(socket, image_root, directory_path); //Lancia eccezioni

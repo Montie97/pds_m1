@@ -1,0 +1,5 @@
+montie
+shish
+root
+C:/Users/loren/Desktop/Politecnico/Automation and Intelligent Cyber-Physical Systems/Primo anno/Programmazione di sistema/Progetto/pds_project_m1_client/Debug/Prova
+10.144.255.213:1234
