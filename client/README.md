@@ -1,6 +1,6 @@
-<h1> pds_m1 </h1>
+# pds_m1
 
-<h2> Comportamento del client </h2>
+## Comportamento del client
 
 Il client, all'avvio, esegue una procedura che consta di quattro fasi:
 -configurazione tramite il file conf.txt
@@ -9,7 +9,7 @@ Il client, all'avvio, esegue una procedura che consta di quattro fasi:
 -sincronizzazione del contenuto locale con il contenuto del server
 Fatto ciò, il client monitora periodicamente la directory specificata nel file conf.txt e segnala al server ogni modifica rilevata.
 
-<h2> Contenuto del file conf.txt </h2>
+## Contenuto del file conf.txt
 
 Il file conf.txt contiene:
 -username
@@ -18,7 +18,7 @@ Il file conf.txt contiene:
 -path della directory da monitorare
 -indirizzo ip del server e porta alla quale connettersi (nel formato ip:port)
 
-<h2> Descrizione delle funzioni </h2>
+## Descrizione delle funzioni
 
 -main: nel main, il client esegue le seguenti operazioni
 	-configurazione: vengono acquisiti, tramite un file di configurazione, il nome dell'utente, la password, il percorso della directory da monitorare ed ip e 			porta del server a cui connettersi
