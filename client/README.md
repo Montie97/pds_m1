@@ -3,11 +3,20 @@
 <h2> Comportamento del client </h2>
 
 Il client, all'avvio, esegue una procedura che consta di quattro fasi:
--configurazione tramite il file conf.txt (in cui sono specificati username, password, nome della root, path della directory e ip:port del server)
+-configurazione tramite il file conf.txt
 -connessione al server
 -autenticazione
 -sincronizzazione del contenuto locale con il contenuto del server
 Fatto ciò, il client monitora periodicamente la directory specificata nel file conf.txt e segnala al server ogni modifica rilevata.
+
+<h2> Contenuto del file conf.txt </h2>
+
+Il file conf.txt contiene:
+-username
+-password
+-nome della root
+-path della directory da monitorare
+-indirizzo ip del server e porta alla quale connettersi (nel formato ip:port)
 
 <h2> Descrizione delle funzioni </h2>
 
