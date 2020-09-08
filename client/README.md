@@ -18,7 +18,7 @@ Il file conf.txt contiene:
  - path della directory da monitorare
  - indirizzo ip del server e porta alla quale connettersi (nel formato ip:port)
 
-## Descrizione delle funzioni
+## Descrizione delle funzioni in main.cpp
 
  - main: nel main, il client esegue le seguenti operazioni
 	- configurazione: vengono acquisiti, tramite un file di configurazione, il nome dell'utente, la password, il percorso della directory da monitorare ed ip e 			porta del server a cui connettersi
@@ -58,4 +58,3 @@ Il file conf.txt contiene:
  - receiveCodeFromServer: funzione che si mette in ascolto sul socket e attende un codice di risposta da parte del server, il quale viene poi ritornato al chiamante
 
  - errorMessage: funzione che stampa a video dei messaggi di errore relativi alle eccezioni lanciate (e catturate) dal programma
-
