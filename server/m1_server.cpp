@@ -61,29 +61,27 @@ std::shared_ptr<Directory> build_dir_wrap(boost::filesystem::path p, const std::
 void ACK(tcp::socket& socket)
 {
 	boost::system::error_code wer;
-	do {
-		boost::asio::streambuf request_out;
-		std::ostream request_stream_out(&request_out);
-		request_stream_out << OK << "\n\n";
-		boost::asio::write(socket, request_out);
-		if (wer) {
-			std::cout << "wer: " << wer.message() << std::endl;
-		}
-	} while (wer);
+	boost::asio::streambuf request_out;
+	std::ostream request_stream_out(&request_out);
+	request_stream_out << OK << "\n\n";
+	boost::asio::write(socket, request_out, wer);
+	if (wer) {
+		std::cout << "wer_ok: " << wer.message() << std::endl;
+		throw wer;
+	}
 }
 
 void sendNotOK(tcp::socket& socket)
 {
 	boost::system::error_code wer;
-	do {
-		boost::asio::streambuf request_out;
-		std::ostream request_stream_out(&request_out);
-		request_stream_out << NOT_OK << "\n\n";
-		boost::asio::write(socket, request_out, wer);
-		if (wer) {
-			std::cout << "wer: " << wer.message() << std::endl;
-		}
-	} while (wer);
+	boost::asio::streambuf request_out;
+	std::ostream request_stream_out(&request_out);
+	request_stream_out << NOT_OK << "\n\n";
+	boost::asio::write(socket, request_out, wer);
+	if (wer) {
+		std::cout << "wer_not_ok: " << wer.message() << std::endl;
+		throw wer;
+	}
 }
 
 void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, std::string& username, std::istream& input_request_stream)
@@ -549,12 +547,22 @@ void clientHandler(tcp::socket& socket)
 			catch (std::exception & e) {
 				std::cout << "EXCEPTION: " << e.what() << std::endl;
 				quit = true;
-				sendNotOK(socket);
+				try {
+					sendNotOK(socket);
+				}
+				catch (boost::system::error_code & error) {
+					std::cout << "EXCEPTION: connessione con il client interrotta" << std::endl;
+				}
 			}
 			catch (boost::system::error_code & error) {
 				std::cout << "EXCEPTION (ERROR): " << error.message() << std::endl;
 				quit = true;
-				sendNotOK(socket);
+				try {
+					sendNotOK(socket);
+				}
+				catch (boost::system::error_code & error) {
+					std::cout << "EXCEPTION: connessione con il client interrotta" << std::endl;
+				}
 			}
 		}
 	}
