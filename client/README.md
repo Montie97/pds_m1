@@ -17,11 +17,11 @@ Fatto ciò, il client monitora periodicamente la directory specificata nel file 
 ## Contenuto del file conf.txt
 
 Il file conf.txt contiene:
--username
--password
--nome della root
--path della directory da monitorare
--indirizzo ip del server e porta alla quale connettersi (nel formato ip:port)
+ - username
+ - password
+ - nome della root
+ - path della directory da monitorare
+ - indirizzo ip del server e porta alla quale connettersi (nel formato ip:port)
 
 ## Descrizione delle funzioni
 
