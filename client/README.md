@@ -17,6 +17,10 @@ Il file conf.txt contiene:
  - nome della root
  - path della directory da monitorare
  - indirizzo ip del server e porta alla quale connettersi (nel formato ip:port)
+ 
+ ## Contenuto della cartella root
+ 
+La cartella root è solo un esempio di directory già pronta così che il client la monitori.
 
 ## Descrizione delle funzioni in main.cpp
 
