@@ -1,5 +1,5 @@
 montie
 shish
 root
-root_prova
+./root
 10.144.255.213:1234
