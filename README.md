@@ -3,7 +3,7 @@
 ## by MONTALTO Lorenzo & MORINA Alessandro
 
 
-### Logica protocollo
+### Logica protocollo (spiegato più approfonditamente nei diagrammi)
 
 Il funzionamento generale della procedura di sincronizzazione è suddivisa in due fasi:
 
