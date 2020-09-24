@@ -371,7 +371,7 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 	std::string file_path;
 	size_t file_size = -1;
 	size_t received_file_size = 0;
-	time_t last_edit; // TODO: AGGIORNARE ROOT CON NUOVO FILE
+	time_t last_edit;
 	boost::system::error_code error;
 
 	// ricezione path file e dimensione
@@ -384,10 +384,11 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 	std::cout << file_path << " size is " << file_size << ", last edited: " << last_edit << std::endl;
 
 	// Invio ACK
-	boost::asio::streambuf request_out;
+	/*boost::asio::streambuf request_out;
 	std::ostream request_stream_out(&request_out);
 	request_stream_out << OK << "\n\n";
-	boost::asio::write(socket, request_out); // gestire errori
+	boost::asio::write(socket, request_out);*/ // gestire errori
+	ACK(socket);
 
 	std::ofstream output_file(username + "/" + root->getName() + "/" + file_path.c_str(), std::ios_base::binary);
 	if (!output_file) {
@@ -420,7 +421,7 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 			ACK(socket);
 
 			received_file_size += len;
-			std::cout << "received chunk bytes: " << len << " | progress: " << (received_file_size * 100 / file_size ) << "%" << std::endl;
+			std::cout << "received chunk bytes: " << len << " | progress: " << (int)(received_file_size * 100.0 / file_size) << "%" << std::endl;
 			if (len > 0) {
 				output_file.write(buf.c_array(), (std::streamsize) len);
 			}
@@ -430,13 +431,16 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 		}
 		else if (com_code == END_SEND_FILE) {
 			// A fine trasmissione, controlla la dimensione file per capire se qualcosa è cambiato durante
-			// il trasferimento, in fine chiude il file
+			// il trasferimento, in fine chiude file
+
 			if (output_file.tellp() == (std::fstream::pos_type)(std::streamsize) file_size) {
 				ACK(socket);
 				std::cout << "file ricevuto senza problemi" << std::endl;
 			}
 			else {
 				sendNotOK(socket);
+				std::cout << "received " << output_file.tellp() << " bytes.\n";
+				output_file.close();
 				throw std::exception("rcv file - dimensione file è cambiata durante la trasmissione, o errore trasmissione file_size");
 			}
 
@@ -448,7 +452,7 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 				throw std::exception("rcv file - il file non è stato creato nell'immagine");
 			}
 
-			//chiusura file
+			// chiusura file
 			std::cout << "received " << output_file.tellp() << " bytes.\n";
 			output_file.close();
 
