@@ -143,7 +143,7 @@ void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, s
 			std::string db_curr_hash_psw;
 			bool logged = false;
 			bool user_found = false;
-			while (!db_file.eof()) {
+			while (!db_file.eof() && !user_found) {
 				db_file >> db_curr_username;
 				db_file >> db_curr_hash_psw;
 
@@ -151,7 +151,7 @@ void startCommunication(tcp::socket& socket, std::shared_ptr<Directory>& root, s
 					user_found = true;
 					if (db_curr_hash_psw == hash_psw) {
 						logged = true;
-						logged_users.push_back(username);
+ 						logged_users.push_back(username);
 					}
 					else {
 						break;
@@ -568,8 +568,11 @@ void clientHandler(tcp::socket& socket)
 	}
 	
 	std::lock_guard<std::mutex> lg(m_db);
-	if(user != "")
+	if (user != "") {
+		std::cout << "disconnecting " << user << std::endl;
 		logged_users.erase(std::find(logged_users.begin(), logged_users.end(), user));
+	}
+		
 	socket.close();
 	std::cout << "end communication with client " << user << std::endl;
 }
