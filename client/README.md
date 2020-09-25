@@ -7,6 +7,7 @@ Il client, all'avvio, esegue una procedura che consta di quattro fasi:
  - connessione al server
  - autenticazione
  - sincronizzazione del contenuto locale con il contenuto del server
+ 
 Fatto ciò, il client monitora periodicamente la directory specificata nel file conf.txt e segnala al server ogni modifica rilevata.
 
 ## Contenuto del file conf.txt
