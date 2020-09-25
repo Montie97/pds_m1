@@ -383,11 +383,6 @@ void startSendingFile(tcp::socket& socket, std::shared_ptr<Directory>& root, con
 
 	std::cout << file_path << " size is " << file_size << ", last edited: " << last_edit << std::endl;
 
-	// Invio ACK
-	/*boost::asio::streambuf request_out;
-	std::ostream request_stream_out(&request_out);
-	request_stream_out << OK << "\n\n";
-	boost::asio::write(socket, request_out);*/ // gestire errori
 	ACK(socket);
 
 	std::ofstream output_file(username + "/" + root->getName() + "/" + file_path.c_str(), std::ios_base::binary);

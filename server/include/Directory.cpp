@@ -210,6 +210,7 @@ void Directory::calculateChecksum()
 	}
 
 	this->checksum = sha1->getDigestToHexString();
+	delete sha1;
 }
 
 std::map<std::string, std::shared_ptr<DirectoryElement>> Directory::getChildren(){

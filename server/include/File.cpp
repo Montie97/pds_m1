@@ -60,6 +60,7 @@ void File::calculateChecksum()
 	sha1->addBytes(time_le.c_str(), strlen(time_le.c_str()));
 	
 	this->checksum = sha1->getDigestToHexString();
+	delete sha1;
 }
 
 std::string File::getPathRec(std::shared_ptr<DirectoryElement> de)
